@@ -259,6 +259,11 @@ class BypassHazardUnit(
     val exRdAddr = Input(Vec(issueWidth, UInt(5.W)))
     val exRfWen = Input(Vec(issueWidth, Bool()))
 
+    val memValid = Input(Vec(issueWidth, Bool()))
+    val memMemRen = Input(Vec(issueWidth, Bool()))
+    val memRdAddr = Input(Vec(issueWidth, UInt(5.W)))
+    val memRfWen = Input(Vec(issueWidth, Bool()))
+
     val pendingWaw = Input(Vec(pendingWawPorts, new PendingRegWriteInfo))
 
     val brTaken = Input(Bool())
@@ -298,12 +303,19 @@ class BypassHazardUnit(
 
   val loadUseBySlot = Wire(Vec(issueWidth, Bool()))
   for (i <- 0 until issueWidth) {
-    loadUseBySlot(i) := anyOr((0 until issueWidth).map { e =>
+    val exLoadUse = anyOr((0 until issueWidth).map { e =>
       io.exValid(e) &&
         io.exMemRen(e) &&
         io.exRfWen(e) &&
         srcDep(io.exRdAddr(e), i)
     })
+    val memLoadUse = anyOr((0 until issueWidth).map { m =>
+      io.memValid(m) &&
+        io.memMemRen(m) &&
+        io.memRfWen(m) &&
+        srcDep(io.memRdAddr(m), i)
+    })
+    loadUseBySlot(i) := exLoadUse || memLoadUse
   }
   val loadUseStall = loadUseBySlot.asUInt.orR
 
@@ -381,11 +393,19 @@ class BypassHazardUnit(
   }
   io.slotIssue := canIssue
 
-  io.slot1Stall := if (issueWidth > 1) slotBlocked(1) else false.B
+  if (issueWidth > 1) {
+    io.slot1Stall := slotBlocked(1)
+  } else {
+    io.slot1Stall := false.B
+  }
   for (i <- 0 until issueWidth) {
     io.rawHazard(i) := intraRawHazard(i) || loadUseBySlot(i)
     io.wawHazard(i) := wawBySlot(i)
   }
   io.loadUseStall := loadUseStall
-  io.wawStall := if (stallOnWaw) wawBySlot.asUInt.orR else false.B
+  if (stallOnWaw) {
+    io.wawStall := wawBySlot.asUInt.orR
+  } else {
+    io.wawStall := false.B
+  }
 }

@@ -1,15 +1,3 @@
-// ===== RV32I 双发射处理器 —— 常量 & 数据类型 =====
-// 本文件定义了所有指令编码、控制信号枚举、流水线寄存器的数据格式。
-// 其他模块都会引用这里的东西。
-//
-// 本次修复要点：
-//   1. AluOp 补齐 RV32M 操作码（与 ParamALU 引用一致）。
-//   2. CSROp 上移到本文件，Decoder 与 CSRFile 共用，消除重复定义。
-//   3. DecodedSlot 新增 csrOp（区分 CSRRW/RS/RC）与 isJalr（区分 JAL/JALR）。
-//   4. 流水线寄存器 IDEX/EXMEM/MEMWB 改为「单槽扁平」结构，流水线侧用 Vec(N, ...)
-//      承载，与 BypassHazardUnit 的使用方式一致；EXMEM/MEMWB 补 csrRdata 字段。
-//   5. MemBusIO 对齐 spec §2.2（req: addr/wdata/wen/wmask；resp: rdata）。
-//   6. 删除与实际模块冲突的过时接口（旧 IMemIO/DMemIO/CSRModuleIO/BPUIO/CPUBundle）。
 package riscv
 
 import chisel3._
@@ -69,7 +57,6 @@ object Instructions {
   val MRET   = BitPat("b00110000001000000000000001110011")
   val FENCE  = BitPat("b?????????????????000?????0001111")
 
-  // ---- RV32M（加分项）----
   val MUL    = BitPat("b0000001??????????000?????0110011")
   val MULH   = BitPat("b0000001??????????001?????0110011")
   val MULHSU = BitPat("b0000001??????????010?????0110011")
@@ -81,7 +68,7 @@ object Instructions {
 }
 
 object AluOp {
-  val W         = 5
+  val W          = 5
   val ALU_ADD    = 0.U(W.W)
   val ALU_SUB    = 1.U(W.W)
   val ALU_AND    = 2.U(W.W)
@@ -94,8 +81,6 @@ object AluOp {
   val ALU_SLTU   = 9.U(W.W)
   val ALU_LUI    = 10.U(W.W)
   val ALU_COPY1  = 11.U(W.W)
-
-  // RV32M（加分项），与 ParamALU 的映射保持一致
   val ALU_MUL    = 12.U(W.W)
   val ALU_MULH   = 13.U(W.W)
   val ALU_MULHSU = 14.U(W.W)
@@ -111,6 +96,7 @@ object Op1Sel {
   val OP1_PC  = 1.U(2.W)
   val OP1_IMM = 2.U(2.W)
 }
+
 object Op2Sel {
   val OP2_RS2 = 0.U(2.W)
   val OP2_IMM = 1.U(2.W)
@@ -140,34 +126,49 @@ object BrType {
   val BR_GEU  = 6.U(3.W)
 }
 
-// CSR 操作类型（Decoder 译出，EX 级执行，CSRFile 消费）。上移到此处共用。
 object CSROp {
   val NONE  = 0.U(2.W)
-  val WRITE = 1.U(2.W) // CSRRW
-  val SET   = 2.U(2.W) // CSRRS
-  val CLEAR = 3.U(2.W) // CSRRC
+  val WRITE = 1.U(2.W)
+  val SET   = 2.U(2.W)
+  val CLEAR = 3.U(2.W)
 }
 
-// valid=1: 指令有效, kill=1: 上游 flush, allowIn=1: 本级可接收新数据
 class PipelineControl extends Bundle {
   val valid   = Bool()
   val kill    = Bool()
   val allowIn = Bool()
 }
 
+class IFIDSlot extends Bundle {
+  val pc         = UInt(32.W)
+  val inst       = UInt(32.W)
+  val slotIdx    = UInt(1.W)
+  val fetchPc    = UInt(32.W)
+  val predTaken  = Bool()
+  val predTarget = UInt(32.W)
+  val predNextPc = UInt(32.W)
+  val seqNextPc  = UInt(32.W)
+  val icacheHit  = Bool()
+  val ctrl       = new PipelineControl
+}
+
 class DecodedSlot extends Bundle {
   val pc        = UInt(32.W)
   val inst      = UInt(32.W)
+  val slotIdx   = UInt(1.W)
+  val fetchPc   = UInt(32.W)
 
   val rs1Addr   = UInt(5.W)
   val rs2Addr   = UInt(5.W)
   val rdAddr    = UInt(5.W)
   val rs1Data   = UInt(32.W)
   val rs2Data   = UInt(32.W)
+  val rs1Use    = Bool()
+  val rs2Use    = Bool()
 
   val imm       = UInt(32.W)
   val csrAddr   = UInt(12.W)
-  val csrOp     = UInt(2.W)   // 新增：CSROp.{NONE,WRITE,SET,CLEAR}
+  val csrOp     = UInt(2.W)
 
   val aluOp     = UInt(AluOp.W.W)
   val op1Sel    = UInt(2.W)
@@ -182,26 +183,24 @@ class DecodedSlot extends Bundle {
 
   val brType    = UInt(3.W)
   val isJump    = Bool()
-  val isJalr    = Bool()       // 新增：区分 JAL（ID 级 redirect）与 JALR（EX 级）
+  val isJalr    = Bool()
   val isSysInst = Bool()
+
+  val predTaken  = Bool()
+  val predTarget = UInt(32.W)
+  val predNextPc = UInt(32.W)
+  val seqNextPc  = UInt(32.W)
+  val csrRdata   = UInt(32.W)
 
   val ctrl      = new PipelineControl
 }
 
-// ---- 流水线寄存器（单槽扁平结构；流水线侧用 Vec(N, ...) 承载）----
-
-class IFIDSlot extends Bundle {
-  val pc   = UInt(32.W)
-  val inst = UInt(32.W)
-  val ctrl = new PipelineControl
-}
-
-// ID/EX 载荷即一条完整译码结果
 class IDEXBundle extends DecodedSlot
 
-// EX/MEM 单槽载荷
 class EXMEMBundle extends Bundle {
   val pc        = UInt(32.W)
+  val inst      = UInt(32.W)
+  val slotIdx   = UInt(1.W)
   val aluOut    = UInt(32.W)
   val rs2Data   = UInt(32.W)
   val rdAddr    = UInt(5.W)
@@ -211,39 +210,22 @@ class EXMEMBundle extends Bundle {
   val memWen    = Bool()
   val memWd     = UInt(2.W)
   val memSigned = Bool()
-  val csrRdata  = UInt(32.W)   // 新增：CSR 读出值（供旁路与写回）
-  val ctrl      = new PipelineControl
+  val csrRdata  = UInt(32.W)
+  val csrOp     = UInt(2.W)
   val brType    = UInt(3.W)
   val isJump    = Bool()
-  val inst      = UInt(32.W)
+  val ctrl      = new PipelineControl
 }
 
-// MEM/WB 单槽载荷
 class MEMWBBundle extends Bundle {
+  val pc       = UInt(32.W)
+  val inst     = UInt(32.W)
+  val slotIdx  = UInt(1.W)
   val aluOut   = UInt(32.W)
   val memData  = UInt(32.W)
   val rdAddr   = UInt(5.W)
   val wbSel    = UInt(2.W)
   val rfWen    = Bool()
-  val pc       = UInt(32.W)
-  val csrRdata = UInt(32.W)    // 新增：CSR 读出值（供旁路与写回）
+  val csrRdata = UInt(32.W)
   val ctrl     = new PipelineControl
-}
-
-// ---- 外部内存总线（对齐 spec §2.2）----
-// 顺序核顶层与 D-Cache 之间的片外总线统一用此结构。
-// 注意：parameterized_cache 包内另有一份同义的 MemBusIO（参数化位宽），
-//       二者字段语义一致；顶层连线时以 D-Cache 实际使用的那份为准。
-class MemBusReq extends Bundle {
-  val addr  = UInt(32.W)
-  val wdata = UInt(32.W)
-  val wen   = Bool()
-  val wmask = UInt(4.W)
-}
-class MemBusResp extends Bundle {
-  val rdata = UInt(32.W)
-}
-class MemBusIO extends Bundle {
-  val req  = Decoupled(new MemBusReq)
-  val resp = Flipped(Decoupled(new MemBusResp))
 }

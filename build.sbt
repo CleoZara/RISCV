@@ -7,6 +7,7 @@ lazy val root = (project in file("."))
     libraryDependencies ++= Seq(
       "edu.berkeley.cs" %% "chisel3"    % "3.5.6",
       "edu.berkeley.cs" %% "chiseltest" % "0.5.4" % Test,
+      "org.scalatest"   %% "scalatest"  % "3.2.17" % Test,
     ),
     scalacOptions ++= Seq(
       "-language:reflectiveCalls",
@@ -14,6 +15,11 @@ lazy val root = (project in file("."))
       "-feature",
       "-Xcheckinit",
     ),
+    Compile / unmanagedSourceDirectories := Seq(baseDirectory.value / "src" / "main"),
+    Compile / unmanagedSources := (Compile / unmanagedSources).value.filterNot { f =>
+      f.getPath.replace('\\', '/').endsWith("src/main/Icache/ICacheMissFSM.scala")
+    },
+    Test / unmanagedSourceDirectories := Seq(baseDirectory.value / "src" / "test"),
     addCompilerPlugin(
       "edu.berkeley.cs" % "chisel3-plugin" % "3.5.6" cross CrossVersion.full
     ),
