@@ -3,6 +3,7 @@ package riscv
 import chisel3._
 import chiseltest._
 import chiseltest.simulator.VerilatorBackendAnnotation
+import firrtl.options.TargetDirAnnotation
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import java.io.{File, PrintWriter}
@@ -53,16 +54,25 @@ class TopSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
                      verbose: Boolean = false): SimResult = {
     var success = false; var cycles = 0
     val output  = new StringBuilder
+    var outputTruncated = false
+    val runDir = s"test_run_dir_${System.currentTimeMillis()}_${math.abs(initFile.hashCode)}"
     test(new SimTop(initFile))
-      .withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      .withAnnotations(Seq(VerilatorBackendAnnotation, TargetDirAnnotation(runDir))) { dut =>
         dut.clock.setTimeout(maxCycles + 100)
         while (!success && cycles < maxCycles) {
           dut.clock.step(); cycles += 1
           if (dut.io.success.peekBoolean()) success = true
           if (dut.io.printChar.valid.peekBoolean()) {
             val ch = dut.io.printChar.bits.peekInt().toChar
-            output.append(ch)
-            if (verbose) print(ch)
+            if (output.length < 4096) {
+              output.append(ch)
+              if (verbose) print(ch)
+            } else if (!outputTruncated) {
+              output.append("\n[output truncated]\n")
+              if (verbose) print("\n[output truncated]\n")
+              outputTruncated = true
+              cycles = maxCycles
+            }
           }
         }
         if (verbose) println(s"\n[sim] ${if (success) "OK" else "TIMEOUT"} in $cycles cycles")

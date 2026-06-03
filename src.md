@@ -1,7 +1,6 @@
-﻿# src/main source files
+﻿# src/main source snapshot
 
 ## src\main\Common\CSR.scala
-
 ```scala
 package riscv
 
@@ -75,8 +74,6 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
     ))
   }
 
-  io.rdata := csrRead(io.raddr)
-
   val oldVal = csrRead(io.waddr)
   io.oldData := oldVal
 
@@ -86,6 +83,12 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
     is(CSROp.SET)   { writeVal := oldVal | io.wdata }
     is(CSROp.CLEAR) { writeVal := oldVal & (~io.wdata).asUInt }
   }
+
+  val csrWriteForward =
+    io.opValid &&
+    (io.waddr === io.raddr) &&
+    (io.waddr =/= CSRAddr.misa)
+  io.rdata := Mux(csrWriteForward, writeVal, csrRead(io.raddr))
 
   when(io.opValid) {
     switch(io.waddr) {
@@ -107,7 +110,6 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
 ```
 
 ## src\main\Common\Defines_c.scala
-
 ```scala
 package riscv
 
@@ -343,7 +345,6 @@ class MEMWBBundle extends Bundle {
 ```
 
 ## src\main\Compat\ICacheMissFSMCompat.scala
-
 ```scala
 package icache
 
@@ -449,7 +450,6 @@ class ICacheMissFSM(p: CacheParams) extends Module {
 ```
 
 ## src\main\Core\BypassHazardUnit.scala
-
 ```scala
 package riscv
 
@@ -862,7 +862,6 @@ class BypassHazardUnit(
 ```
 
 ## src\main\Core\EXStage.scala
-
 ```scala
 package riscv
 
@@ -941,14 +940,17 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
       (isBranch && branchTaken(i)) -> branchTarget(i)
     ))
 
-    redirect(i) := slotValid(i) &&
+    val killedByOlderRedirect = if (i == 0) false.B else redirect(0)
+    val slotLive = slotValid(i) && !killedByOlderRedirect
+
+    redirect(i) := slotLive &&
                    (isBranch || io.in(i).isJalr) &&
                    (actualNextPc(i) =/= io.in(i).predNextPc)
 
-    io.exValid(i)  := slotValid(i)
-    io.exMemRen(i) := slotValid(i) && io.in(i).memRen
+    io.exValid(i)  := slotLive
+    io.exMemRen(i) := slotLive && io.in(i).memRen
     io.exRdAddr(i) := io.in(i).rdAddr
-    io.exRfWen(i)  := slotValid(i) && io.in(i).rfWen
+    io.exRfWen(i)  := slotLive && io.in(i).rfWen
     io.exResult(i) := alus(i).io.result
 
     io.out(i) := 0.U.asTypeOf(new EXMEMBundle)
@@ -959,23 +961,26 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     io.out(i).rs2Data   := io.storeData(i)
     io.out(i).rdAddr    := io.in(i).rdAddr
     io.out(i).wbSel     := io.in(i).wbSel
-    io.out(i).rfWen     := slotValid(i) && io.in(i).rfWen
-    io.out(i).memRen    := slotValid(i) && io.in(i).memRen
-    io.out(i).memWen    := slotValid(i) && io.in(i).memWen
+    io.out(i).rfWen     := slotLive && io.in(i).rfWen
+    io.out(i).memRen    := slotLive && io.in(i).memRen
+    io.out(i).memWen    := slotLive && io.in(i).memWen
     io.out(i).memWd     := io.in(i).memWd
     io.out(i).memSigned := io.in(i).memSigned
     io.out(i).csrRdata  := io.csrOldData
-    io.out(i).csrOp     := Mux(slotValid(i), io.in(i).csrOp, CSROp.NONE)
-    io.out(i).brType    := Mux(slotValid(i), io.in(i).brType, BrType.BR_NONE)
-    io.out(i).isJump    := slotValid(i) && io.in(i).isJump
-    io.out(i).ctrl.valid   := slotValid(i)
-    io.out(i).ctrl.kill    := io.flushEx || io.in(i).ctrl.kill
+    io.out(i).csrOp     := Mux(slotLive, io.in(i).csrOp, CSROp.NONE)
+    io.out(i).brType    := Mux(slotLive, io.in(i).brType, BrType.BR_NONE)
+    io.out(i).isJump    := slotLive && io.in(i).isJump
+    io.out(i).ctrl.valid   := slotLive
+    io.out(i).ctrl.kill    := io.flushEx || io.in(i).ctrl.kill || killedByOlderRedirect
     io.out(i).ctrl.allowIn := true.B
   }
 
   // 鈹€鈹€ CSR operation 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-  val csrSlot0 = slotValid(0) && io.in(0).csrOp =/= CSROp.NONE
-  val csrSlot1 = slotValid(1) && io.in(1).csrOp =/= CSROp.NONE
+  val slot0Live = slotValid(0)
+  val slot1Live = slotValid(1) && !redirect(0)
+
+  val csrSlot0 = slot0Live && io.in(0).csrOp =/= CSROp.NONE
+  val csrSlot1 = slot1Live && io.in(1).csrOp =/= CSROp.NONE
   val csrIdx   = Mux(csrSlot0, 0.U, 1.U)
   io.csrOpValid := csrSlot0 || csrSlot1
   io.csrOpType  := Mux(csrSlot0, io.in(0).csrOp,  io.in(1).csrOp)
@@ -987,21 +992,16 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
   io.exRedirectPc    := Mux(redirect(0), actualNextPc(0), actualNextPc(1))
 
   // 鈹€鈹€ BPU update 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-  // P1 fix: JALR must also update the BPU/BTB so the predictor learns the
-  // indirect-call target.  Without this the BTB never converges and every
-  // JALR (function call/return) pays the full 2-cycle flush penalty forever.
-  //
   // Update source priority: slot 0 > slot 1 (slot 0 is the older instruction).
-  // If both slots trigger an update in the same cycle (extremely rare after
-  // the IDStage slot0Ctrl fix), slot 0 is recorded and slot 1 is silently
-  // dropped.  The dropped update will be re-trained on the next occurrence.
-  val br0   = slotValid(0) && io.in(0).brType =/= BrType.BR_NONE
-  val br1   = slotValid(1) && io.in(1).brType =/= BrType.BR_NONE
-  val jalr0 = slotValid(0) && io.in(0).isJalr
-  val jalr1 = slotValid(1) && io.in(1).isJalr
+  // Only conditional branches update the bi-mode BPU. JALR/ret targets are
+  // indirect and need a RAS or per-context predictor; training them into the
+  // simple BTB makes shared return sites such as _putchar.ret predict stale
+  // call-site addresses.
+  val br0   = slot0Live && io.in(0).brType =/= BrType.BR_NONE
+  val br1   = slot1Live && io.in(1).brType =/= BrType.BR_NONE
 
-  val isUpdate0 = br0 || jalr0
-  val isUpdate1 = br1 || jalr1
+  val isUpdate0 = br0
+  val isUpdate1 = br1
 
   io.bpuUpdateValid := isUpdate0 || isUpdate1
 
@@ -1009,24 +1009,20 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
 
   io.bpuUpdatePc := Mux(bpuFromSlot0, io.in(0).pc, io.in(1).pc)
 
-  // For JALR: always "taken" (unconditional jump).
-  // For branches: use the resolved branch outcome.
   io.bpuUpdateTaken := Mux(bpuFromSlot0,
-    Mux(jalr0, true.B, branchTaken(0)),
-    Mux(jalr1, true.B, branchTaken(1)))
+    branchTaken(0),
+    branchTaken(1))
 
-  // BTB target: for branches, always store the branch-target address (pc+imm)
-  // regardless of taken/not-taken, so the BTB is correct when the branch IS
-  // later taken.  For JALR, store the resolved indirect target.
-  val updateTarget0 = Mux(jalr0, jalrTarget(0), branchTarget(0))
-  val updateTarget1 = Mux(jalr1, jalrTarget(1), branchTarget(1))
+  // BTB target: always store the branch-target address (pc+imm) regardless of
+  // taken/not-taken, so the BTB is correct when the branch is later taken.
+  val updateTarget0 = branchTarget(0)
+  val updateTarget1 = branchTarget(1)
   io.bpuUpdateTarget := Mux(bpuFromSlot0, updateTarget0, updateTarget1)
 
 }
 ```
 
 ## src\main\Core\IDStage.scala
-
 ```scala
 package riscv
 
@@ -1099,7 +1095,7 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
     slotValid(0) &&
     dec(0).io.out.rfWen &&
     !dec(0).io.out.memRen &&                           // Load result not available in EX
-    (dec(0).io.out.wbSel =/= WbSel.WB_MEM) &&         // belt-and-suspenders
+    (dec(0).io.out.wbSel === WbSel.WB_ALU) &&         // only ALU results are available to F5
     (dec(0).io.out.rdAddr =/= 0.U)
 
   // 鈹€鈹€ Slot-1 stall conditions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
@@ -1117,6 +1113,8 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   val slot1Mem = slotValid(1) && (dec(1).io.out.memRen || dec(1).io.out.memWen)
   val slot0Csr = slotValid(0) && dec(0).io.out.csrOp =/= CSROp.NONE
   val slot1Csr = slotValid(1) && dec(1).io.out.csrOp =/= CSROp.NONE
+  val slot1Ctrl = slotValid(1) &&
+                  (dec(1).io.out.isJump || (dec(1).io.out.brType =/= BrType.BR_NONE))
 
   // P1 fix: slot0Ctrl must block slot 1 only when slot 1 would be on the
   // wrong execution path, i.e.:
@@ -1132,13 +1130,16 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
                            eff(0).predTaken        // BPU predicted this branch as taken
   val slot0Ctrl = slot0IsJal || slot0IsJalr || slot0BranchTaken
 
-  val slot1Blocked = slotRaw01 || (slot0Mem && slot1Mem) || (slot0Csr && slot1Csr) || slot0Ctrl
+  val slot1DataOrResourceBlocked = slotRaw01 || (slot0Mem && slot1Mem) || (slot0Csr && slot1Csr)
+  val slot1ReplayBlocked = slot1DataOrResourceBlocked || slot1Ctrl
+  val slot1Blocked = slot1ReplayBlocked || slot0Ctrl
 
   val canIssue0 = slotValid(0) && !io.stallId && !io.flushId
   val canIssue1 = canIssue0 && slotValid(1) && !slot1Blocked
 
-  // Capture slot 1 for the next cycle when it is blocked
-  val capturePending = canIssue0 && slotValid(1) && !canIssue1 && !pendingValid
+  // Capture slot 1 only for replayable data/resource conflicts.  If slot 0 is
+  // a control-flow instruction, slot 1 is wrong-path and must be squashed.
+  val capturePending = canIssue0 && slotValid(1) && !slot0Ctrl && slot1ReplayBlocked && !pendingValid
   when(io.flushId) {
     pendingValid := false.B
   }.elsewhen(capturePending) {
@@ -1219,7 +1220,6 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
 ```
 
 ## src\main\Core\IFStage.scala
-
 ```scala
 package riscv
 
@@ -1264,6 +1264,7 @@ class IFStage extends Module {
   pcGen.io.bpuPredTaken    := io.bpuPredTaken
   pcGen.io.bpuPredTarget   := io.bpuPredTarget
   pcGen.io.stallIf         := io.stallIf
+  pcGen.io.fetchSlot1Valid := icache.io.instValids(1)
 
   io.bpuQueryPc := pcGen.io.pcFetch
   io.debugPc := pcGen.io.currPc
@@ -1282,7 +1283,8 @@ class IFStage extends Module {
   icache.io.pfReqAddr  := prefetcher.io.pfReqAddr
   prefetcher.io.pfReqReady := icache.io.pfReqReady
 
-  val seqNextPc = pcGen.io.pcFetch + (issueWidth * 4).U
+  val seqStep = Mux(icache.io.instValids(1), (issueWidth * 4).U(32.W), 4.U(32.W))
+  val seqNextPc = pcGen.io.pcFetch + seqStep
   for (i <- 0 until issueWidth) {
     val slotPc = pcGen.io.pcFetch + (i * 4).U
     val slotPredNextPc = Mux(io.bpuPredTaken, io.bpuPredTarget, slotPc + 4.U)
@@ -1307,7 +1309,6 @@ class IFStage extends Module {
 ```
 
 ## src\main\Core\InOrderCore.scala
-
 ```scala
 package riscv
 
@@ -1487,7 +1488,6 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
 ```
 
 ## src\main\Core\MEMStage.scala
-
 ```scala
 package riscv
 
@@ -1558,8 +1558,27 @@ class MEMStage extends Module {
   dcache.io.mtimeHi := io.mtimeHi
   io.dmem <> dcache.io.mem
 
-  val printValidReg = RegNext(isPrintfWrite, false.B)
-  val printBitsReg  = RegEnable(io.in(memIdx).rs2Data(7, 0), 0.U(8.W), isPrintfWrite)
+  val printPc   = io.in(memIdx).pc
+  val printBits = io.in(memIdx).rs2Data(7, 0)
+
+  val lastPrintValid = RegInit(false.B)
+  val lastPrintPc    = RegInit(0.U(32.W))
+  val lastPrintBits  = RegInit(0.U(8.W))
+  val samePrintAsLast = lastPrintValid &&
+                        (lastPrintPc === printPc) &&
+                        (lastPrintBits === printBits)
+  val printFire = isPrintfWrite && !samePrintAsLast
+
+  when(isPrintfWrite) {
+    lastPrintValid := true.B
+    lastPrintPc    := printPc
+    lastPrintBits  := printBits
+  }.otherwise {
+    lastPrintValid := false.B
+  }
+
+  val printValidReg = RegNext(printFire, false.B)
+  val printBitsReg  = RegEnable(printBits, 0.U(8.W), printFire)
 
   io.dcacheStall := dcache.io.stall || dcache.io.missOut
   io.printChar.valid := printValidReg
@@ -1585,7 +1604,6 @@ class MEMStage extends Module {
 ```
 
 ## src\main\Core\RegFile.scala
-
 ```scala
 package riscv
 
@@ -1630,7 +1648,6 @@ class RegFile(issueWidth: Int = 2) extends Module {
 ```
 
 ## src\main\Core\WBStage.scala
-
 ```scala
 package riscv
 
@@ -1678,7 +1695,6 @@ class WBStage extends Module {
 ```
 
 ## src\main\Dcache\CacheParams.scala
-
 ```scala
 package parameterized_cache
 
@@ -1717,7 +1733,6 @@ class TagEntry(p: CacheParams) extends Bundle {
 ```
 
 ## src\main\Dcache\DataArray.scala
-
 ```scala
 package parameterized_cache
 
@@ -1766,7 +1781,6 @@ class DataArray(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\DCacheMissFSM.scala
-
 ```scala
 package parameterized_cache
 
@@ -1865,7 +1879,6 @@ class DCacheMissFSM(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\DCacheTop.scala
-
 ```scala
 package parameterized_cache
 
@@ -2014,7 +2027,6 @@ class DCacheTop(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\HitTest.scala
-
 ```scala
 package parameterized_cache
 
@@ -2043,7 +2055,6 @@ class HitTest(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\LoadExtend.scala
-
 ```scala
 package parameterized_cache
 
@@ -2076,7 +2087,6 @@ class LoadExtend(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\MemBusIO.scala
-
 ```scala
 package parameterized_cache
 
@@ -2101,7 +2111,6 @@ class MemBusIO(p: CacheParams) extends Bundle {
 ```
 
 ## src\main\Dcache\TagArray.scala
-
 ```scala
 package parameterized_cache
 
@@ -2148,7 +2157,6 @@ class TagArray(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\TreePLRU.scala
-
 ```scala
 package parameterized_cache
 
@@ -2202,7 +2210,6 @@ class TreePLRU(p: CacheParams) extends Module {
 ```
 
 ## src\main\Decode\Decoder_c.scala
-
 ```scala
 package riscv
 
@@ -2358,7 +2365,6 @@ class Decoder(enableRV32M: Boolean = false) extends Module {
 ```
 
 ## src\main\Execute\ALU.scala
-
 ```scala
 package riscv
 
@@ -2447,8 +2453,567 @@ class ParamALU(val xlen: Int = 32, val enableRV32M: Boolean = false) extends Mod
 }
 ```
 
-## src\main\Frontend\BPU.scala
+## src\main\frame.md
+```scala
+# 娴佹按绾挎鏋惰鏄?
+## IF 妯″潡
 
+IF 妯″潡璐熻矗 PC 鐢熸垚銆丅PU 鏌ヨ銆両-Cache 鍙栨寚銆侀鍙栧櫒鎺у埗鍜?IF/ID 娴佹按瀵勫瓨鍣ㄨ緭鍑恒€傚綋鍓嶄富绾垮浐瀹氬弻鍙戯紝鍥犳 `issueWidth = 2`銆?
+### 鏆撮湶鎺ュ彛璇存槑
+
+| 淇″彿鍚?| 浣嶅/绫诲瀷 | 鏂瑰悜 | 璇存槑 |
+| --- | --- | --- | --- |
+| `stallIf` | `Bool` | Input | IF 绾у仠椤夸俊鍙枫€備负 1 鏃?PC 淇濇寔涓嶅彉锛岄€氬父鐢?I-Cache miss銆丏-Cache miss 鎴栧悗绔樆濉炶Е鍙戙€?|
+| `flushIf` | `Bool` | Input | IF 绾у啿鍒蜂俊鍙枫€備负 1 鏃跺綋鍓嶅彇鎸囩粨鏋滃簲浣滃簾锛岃緭鍑?bubble銆?|
+| `exRedirectValid` | `Bool` | Input | EX 绾?redirect 鏈夋晥淇″彿锛屼紭鍏堢骇鏈€楂樸€傜敤浜庡垎鏀棰勬祴淇銆丣ALR 鐩爣淇绛夈€?|
+| `exRedirectPc` | `UInt(32.W)` | Input | EX 绾?redirect 鐩爣 PC銆?|
+| `idRedirectValid` | `Bool` | Input | ID 绾?redirect 鏈夋晥淇″彿锛屼富瑕佺敤浜?JAL 鍦ㄨ瘧鐮佺骇鎻愬墠鏀瑰悜銆備紭鍏堢骇浣庝簬 EX redirect锛岄珮浜?stall 鍜?BPU 棰勬祴銆?|
+| `idRedirectPc` | `UInt(32.W)` | Input | ID 绾?redirect 鐩爣 PC銆?|
+| `bpuQueryPc` | `UInt(32.W)` | Output | 閫佸線 BPU 鐨勬煡璇?PC锛岄€氬父绛変簬褰撳墠 `pcFetch`銆?|
+| `bpuPredTaken` | `Bool` | Input | BPU 杩斿洖鐨勯娴嬫柟鍚戙€備负 1 琛ㄧず棰勬祴璺宠浆銆?|
+| `bpuPredTarget` | `UInt(32.W)` | Input | BPU 杩斿洖鐨勯娴嬬洰鏍囧湴鍧€銆備粎褰?`bpuPredTaken` 涓?1 鏃舵湁鏁堛€?|
+| `nextLinePrefetchEn` | `Bool` | Input | Next-line 棰勫彇鍣ㄥ紑鍏炽€傚缓璁敱 CSR `prefetchCtrl(0)` 鎺у埗銆備笌 stride 棰勫彇鍣ㄥ紑鍏充簰涓嶅奖鍝嶃€?|
+| `stridePrefetchEn` | `Bool` | Input | Stride 棰勫彇鍣ㄥ紑鍏炽€傚缓璁敱 CSR `prefetchCtrl(1)` 鎺у埗銆備笌 next-line 棰勫彇鍣ㄥ紑鍏充簰涓嶅奖鍝嶃€?|
+| `out` | `Vec(2, IFIDSlot)` | Output | IF 鍒?ID 鐨勫弻鍙戝彇鎸囩粨鏋滐紝姣忔媿鏈€澶氳緭鍑轰袱涓?slot銆?|
+| `icacheStall` | `Bool` | Output | I-Cache stall/miss 淇″彿锛岄€佸線 Hazard/Control 鍗曞厓锛岀敤浜庡喕缁撳墠绔垨鍏ㄦ祦姘淬€?|
+| `imem` | `MemBusIO` | IO | I-Cache miss/refill 鍜岄鍙栬姹備娇鐢ㄧ殑澶栭儴鍐呭瓨鎬荤嚎銆?|
+| `debugPc` | `UInt(32.W)` | Output | 璋冭瘯 PC锛岄€氬父绛変簬褰撳墠 IF 绾?PC銆?|
+
+### `IFIDSlot` 灞曞紑
+
+| 瀛楁鍚?| 浣嶅/绫诲瀷 | 璇存槑 |
+| --- | --- | --- |
+| `pc` | `UInt(32.W)` | 褰撳墠 slot 瀵瑰簲鎸囦护鐨?PC銆俿lot0 涓?`fetchPc`锛宻lot1 涓?`fetchPc + 4`銆?|
+| `inst` | `UInt(32.W)` | 褰撳墠 slot 鐨?32 浣嶆寚浠ゃ€?|
+| `ctrl.valid` | `Bool` | 褰撳墠 slot 鏄惁鍖呭惈鏈夋晥鎸囦护銆侷-Cache miss銆乻lot1 璺?cache line銆乫lush 鎴?bubble 鏃朵负 0銆?|
+| `ctrl.kill` | `Bool` | 褰撳墠 slot 鏄惁琚?flush 鏉€鎺夈€備富瑕佺敤浜庤皟璇曞拰鍚庣骇闃插尽鎬у垽鏂€?|
+| `ctrl.allowIn` | `Bool` | 褰撳墠 slot 鏄惁鍏佽杩涘叆涓嬩竴绾с€侷F 杈撳嚭渚у彲鍥哄畾涓?1锛岀湡姝ｅ啓鍏?IF/ID 瀵勫瓨鍣ㄧ敱椤跺眰 stall 鎺у埗銆?|
+| `slotIdx` | `UInt(1.W)` | 鍙屽彂妲界紪鍙枫€俿lot0 涓?0锛宻lot1 涓?1銆?|
+| `fetchPc` | `UInt(32.W)` | 鏈媿鍙栨寚 bundle 鐨勫熀鍦板潃锛屽嵆 slot0 鐨?PC銆?|
+| `predTaken` | `Bool` | BPU 瀵规湰鎷嶅彇鎸?PC 鐨勯娴嬫柟鍚戙€傚熀纭€鐗堜袱涓?slot 鍙叡浜悓涓€娆?BPU 鏌ヨ缁撴灉銆?|
+| `predTarget` | `UInt(32.W)` | BPU 棰勬祴鐩爣鍦板潃銆?|
+| `predNextPc` | `UInt(32.W)` | IF 绾ф牴鎹娴嬪疄闄呴€夋嫨鐨勪笅涓€鍙栨寚 PC銆傝嫢棰勬祴璺宠浆鍒欎负 `predTarget`锛屽惁鍒欎负椤哄簭涓嬩竴 bundle PC銆?|
+| `seqNextPc` | `UInt(32.W)` | 涓嶈烦杞椂鐨勯『搴忎笅涓€ bundle PC銆傚弻鍙戝浐瀹氫负 `fetchPc + 8`銆?|
+| `icacheHit` | `Bool` | 褰撳墠鍙栨寚缁撴灉鏄惁鏉ヨ嚜 I-Cache 鍛戒腑鍝嶅簲銆備富瑕佺敤浜庤皟璇曞拰鎬ц兘缁熻銆?|
+
+### 棰勫彇寮€鍏崇害瀹?
+`nextLinePrefetchEn` 鍜?`stridePrefetchEn` 鏄袱涓嫭绔嬪紑鍏筹紝浠绘剰涓€涓叧闂兘涓嶅簲褰卞搷鍙︿竴涓鍙栧櫒鐨勫唴閮ㄧ姸鎬佹洿鏂板拰璇锋眰鐢熸垚绛栫暐銆?
+寤鸿 CSR 鏄犲皠濡備笅锛?
+| CSR 瀛楁 | 鎺у埗瀵硅薄 | 璇存槑 |
+| --- | --- | --- |
+| `prefetchCtrl(0)` | `nextLinePrefetchEn` | 涓?1 鏃跺厑璁?next-line 棰勫彇鍣ㄥ彂璧烽鍙栬姹傘€?|
+| `prefetchCtrl(1)` | `stridePrefetchEn` | 涓?1 鏃跺厑璁?stride 棰勫彇鍣ㄥ彂璧烽鍙栬姹傘€?|
+
+褰撲袱涓鍙栧櫒鍚屾椂鍙戣捣璇锋眰鏃讹紝IF 鍐呴儴搴斿厛淇濊瘉 demand miss 浼樺厛绾ф渶楂橈紱棰勫彇璇锋眰涔嬮棿鍙厛閲囩敤鍥哄畾浼樺厛绾э紝渚嬪 next-line 浼樺厛浜?stride锛屽悗缁啀鏀逛负杞浠茶銆?
+## ID 妯″潡
+
+ID 妯″潡璐熻矗鎺ユ敹 IF/ID 娴佹按瀵勫瓨鍣ㄤ腑鐨勫弻鍙戝彇鎸囩粨鏋滐紝瀹屾垚璇戠爜銆佸瘎瀛樺櫒鍫嗚鍦板潃鐢熸垚銆丆SR 璇诲湴鍧€鐢熸垚銆佹Ы闂村彂灏勭害鏉熷垽鏂紝骞惰緭鍑?ID/EX 娴佹按瀵勫瓨鍣ㄥ唴瀹广€?
+褰撳墠椤哄簭鏍搁噰鐢ㄥ墠缂€杩炵画鍙戝皠绛栫暐锛氭Ы 0 涓嶈兘鍙戝皠鏃讹紝妲?1 蹇呴』鍚屾椂鍙樹负 bubble锛涙Ы 1 涓嶈兘鍙戝皠鏃讹紝鍙奖鍝嶆Ы 1锛屼笉鍏佽璺宠繃妲?0 鍘诲彂灏勬洿鍚庨潰鐨勬寚浠ゃ€?
+### 鏆撮湶鎺ュ彛璇存槑
+
+| 淇″彿鍚?| 浣嶅/绫诲瀷 | 鏂瑰悜 | 璇存槑 |
+| --- | --- | --- | --- |
+| `in` | `Vec(2, IFIDSlot)` | Input | 鏉ヨ嚜 IF/ID 娴佹按瀵勫瓨鍣ㄧ殑鍙屽彂鍙栨寚缁撴灉銆?|
+| `stallId` | `Bool` | Input | ID 绾у仠椤夸俊鍙枫€備负 1 鏃?ID/EX 娴佹按瀵勫瓨鍣ㄤ繚鎸佷笉鍙橈紝涓や釜妲藉潎鍐荤粨銆?|
+| `flushId` | `Bool` | Input | ID 绾у啿鍒蜂俊鍙枫€備负 1 鏃跺綋鍓?ID 杈撳嚭鍏ㄩ儴鍙樹负 bubble銆?|
+| `regRs1Addr` | `Vec(2, UInt(5.W))` | Output | 閫佸線 RegFile 鐨?rs1 璇诲湴鍧€銆?|
+| `regRs2Addr` | `Vec(2, UInt(5.W))` | Output | 閫佸線 RegFile 鐨?rs2 璇诲湴鍧€銆?|
+| `regRs1Data` | `Vec(2, UInt(32.W))` | Input | RegFile 杩斿洖鐨?rs1 鏁版嵁銆?|
+| `regRs2Data` | `Vec(2, UInt(32.W))` | Input | RegFile 杩斿洖鐨?rs2 鏁版嵁銆?|
+| `csrRaddr` | `UInt(12.W)` | Output | 閫佸線 CSRFile 鐨勮鍦板潃銆傚熀纭€瀹炵幇寤鸿鍚屽懆鏈熸渶澶氬厑璁镐竴鏉?CSR 鎸囦护杩涘叆 EX銆?|
+| `csrRdata` | `UInt(32.W)` | Input | CSRFile 杩斿洖鐨?CSR 鏃у€硷紝鐢ㄤ簬鍚庣画 CSR 鍐欏洖璇箟銆?|
+| `idRedirectValid` | `Bool` | Output | ID 绾?redirect 鏈夋晥淇″彿锛屼富瑕佺敤浜?JAL 鎻愬墠鏀瑰悜銆?|
+| `idRedirectPc` | `UInt(32.W)` | Output | ID 绾?redirect 鐩爣 PC锛岄€氬父涓?JAL 鐨?`pc + immJ`銆?|
+| `hazardIdValid` | `Vec(2, Bool)` | Output | 閫佸線 HazardUnit 鐨?ID 妲芥湁鏁堜俊鍙枫€?|
+| `hazardRs1Addr` | `Vec(2, UInt(5.W))` | Output | 閫佸線 HazardUnit 鐨?rs1 鍦板潃銆?|
+| `hazardRs2Addr` | `Vec(2, UInt(5.W))` | Output | 閫佸線 HazardUnit 鐨?rs2 鍦板潃銆?|
+| `hazardRs1Use` | `Vec(2, Bool)` | Output | 褰撳墠鎸囦护鏄惁瀹為檯浣跨敤 rs1銆?|
+| `hazardRs2Use` | `Vec(2, Bool)` | Output | 褰撳墠鎸囦护鏄惁瀹為檯浣跨敤 rs2銆?|
+| `hazardRdAddr` | `Vec(2, UInt(5.W))` | Output | 閫佸線 HazardUnit 鐨?rd 鍦板潃銆?|
+| `hazardRfWen` | `Vec(2, Bool)` | Output | 褰撳墠鎸囦护鏄惁鍐欓€氱敤瀵勫瓨鍣ㄣ€?|
+| `loadUseStall` | `Bool` | Input | HazardUnit 缁欏嚭鐨?load-use stall銆備负 1 鏃舵Ы 0 鍜屾Ы 1 鍧囧喕缁擄紝涓嶄骇鐢熸柊鍙戝皠銆?|
+| `structuralStall` | `Bool` | Input | I-Cache miss銆丏-Cache miss 鎴栧悗绔粨鏋勯樆濉炵殑鍚堝苟鍋滈】銆備负 1 鏃舵墍鏈夋Ы鍐荤粨銆?|
+| `out` | `Vec(2, IDEXBundle)` | Output | ID 鍒?EX 鐨勫弻鍙戣瘧鐮佺粨鏋溿€?|
+
+### 鍐呴儴妲介棿 RAW 妫€娴?
+ID 绾у繀椤绘娴嬪悓涓€鍙栨寚鍖呭唴鐨勬Ы闂?RAW 鍐茬獊銆傝鍒欏涓嬶細
+
+| 鏉′欢 | 澶勭悊鏂瑰紡 |
+| --- | --- |
+| `slot0Valid && slot1Valid && slot0.rfWen && slot0.rdAddr =/= 0.U && slot0.rdAddr === slot1.rs1Addr && slot1.rs1Use` | 鏈懆鏈熼檷绾у崟鍙戝皠锛氫粎鍙戝皠妲?0锛屾Ы 1 鍙樹负 bubble锛屽苟鍦ㄤ笅涓€鍛ㄦ湡閲嶆柊灏濊瘯鍙戝皠銆?|
+| `slot0Valid && slot1Valid && slot0.rfWen && slot0.rdAddr =/= 0.U && slot0.rdAddr === slot1.rs2Addr && slot1.rs2Use` | 鏈懆鏈熼檷绾у崟鍙戝皠锛氫粎鍙戝皠妲?0锛屾Ы 1 鍙樹负 bubble锛屽苟鍦ㄤ笅涓€鍛ㄦ湡閲嶆柊灏濊瘯鍙戝皠銆?|
+
+缁勫悎琛ㄨ揪寮忓彲鍐欎负锛?
+```scala
+val slotRaw01 =
+  slot0Valid &&
+  slot1Valid &&
+  slot0.rfWen &&
+  (slot0.rdAddr =/= 0.U) &&
+  ((slot1.rs1Use && slot0.rdAddr === slot1.rs1Addr) ||
+   (slot1.rs2Use && slot0.rdAddr === slot1.rs2Addr))
+```
+
+鏈璁′笉鍦?ID 绾ч€氳繃鍚屽懆鏈熸梺璺В鍐虫Ы 0 鍒版Ы 1 鐨?RAW銆傚彧瑕佹娴嬪埌妲介棿 RAW锛屾Ы 1 蹇呴』绛夊緟妲?0 瀹屾垚鍐欏洖鍚庡啀閲嶆柊灏濊瘯鍙戝皠銆?
+### 鍓嶇紑杩炵画鍙戝皠璇箟
+
+ID 绾у彂灏勫繀椤绘弧瓒冲墠缂€杩炵画鎬с€備换鎰忔Ы鏃犳硶鍙戝皠鏃讹紝鍏跺悗鐨勬Ы閮藉繀椤诲彉涓?bubble锛屼笉鑳借烦杩囧綋鍓嶆Ы鍙戝皠鍚庣画鎸囦护銆?
+| 鏉′欢 | 褰卞搷妲戒綅 |
+| --- | --- |
+| 妲?0 `valid=0`锛屼緥濡傚彇鎸囧寘涓嶈冻鎴栧榻愰棶棰?| 妲?0 鍜屾Ы 1 鍧囦负 bubble |
+| 妲?1 `valid=0`锛屼緥濡傚彇鎸囧寘浠呰繑鍥?1 鏉?| 浠呮Ы 1 涓?bubble |
+| 妲?1 涓庢Ы 0 瀛樺湪鍐呴儴 RAW 鍐茬獊 | 浠呮Ы 1 涓?bubble |
+| `loadUseStall=1` | 妲?0 鍜屾Ы 1 鍧囧喕缁擄紝ID/EX 淇濇寔涓嶅彉 |
+| `structuralStall=1`锛屼緥濡?D-Cache miss 鎴?I-Cache miss | 鎵€鏈夋Ы鍐荤粨锛屾暣鏉℃祦姘寸嚎淇濇寔涓嶅彉 |
+| `flushId=1` | 妲?0 鍜屾Ы 1 鍧囧彉涓?bubble |
+
+鎺ㄨ崘鍙戝皠鏈夋晥淇″彿锛?
+```scala
+val slot0CanIssue =
+  in(0).ctrl.valid &&
+  !in(0).ctrl.kill &&
+  !flushId &&
+  !stallId &&
+  !loadUseStall &&
+  !structuralStall
+
+val slot1CanIssue =
+  slot0CanIssue &&
+  in(1).ctrl.valid &&
+  !in(1).ctrl.kill &&
+  !slotRaw01
+```
+
+杈撳嚭鍒?ID/EX 鏃讹細
+
+```scala
+out(0).ctrl.valid := slot0CanIssue
+out(1).ctrl.valid := slot1CanIssue
+```
+
+褰?`slot1CanIssue=false` 涓?`slot0CanIssue=true` 鏃讹紝鏈懆鏈熶负鍗曞彂灏勶紱妲?1 瀵瑰簲 ID/EX 鍐呭蹇呴』鍐欐垚瀹夊叏 bubble锛岃嚦灏戜繚璇侊細
+
+```scala
+rfWen  := false.B
+memRen := false.B
+memWen := false.B
+csrOp  := CSROp.NONE
+brType := BrType.BR_NONE
+```
+
+### 妲?1 閲嶆柊灏濊瘯鍙戝皠鐨勮姹?
+褰撴Ы 1 鍥犲唴閮?RAW 鍐茬獊琚檷绾т负 bubble 鏃讹紝绯荤粺蹇呴』淇濊瘉妲?1 鎸囦护涓嶄細涓㈠け銆傚疄鐜版柟寮忎簩閫変竴锛?
+| 鏂瑰紡 | 璇存槑 |
+| --- | --- |
+| 淇濇寔 IF/ID 瀵勫瓨鍣?| 褰撴Ы 1 鍥犲唴閮?RAW 鍋滃彂鏃讹紝鍐荤粨 IF/ID 涓殑妲?1锛屼笅涓€鍛ㄦ湡缁х画灏濊瘯鍙戝皠銆傚疄鐜扮畝鍗曚絾闇€瑕佸鐞嗘Ы 0 宸插彂灏勫悗鐨勭姸鎬併€?|
+| 寮曞叆灏忓瀷 pending slot | 灏嗘湭鍙戝皠鐨勬Ы 1 淇濆瓨鍒?ID 鍐呴儴 pending 瀵勫瓨鍣紝涓嬩竴鍛ㄦ湡浼樺厛浣滀负妲?0 灏濊瘯鍙戝皠銆傛帴鍙ｆ洿娓呮櫚锛屾帹鑽愮敤浜庡悗缁噸鏋勩€?|
+
+涓轰簡淇濇寔鍓嶇紑杩炵画鍙戝皠璇箟锛屾帹鑽愪娇鐢?pending slot 鏂规锛氳闄嶇骇鐨勬Ы 1 涓嬩竴鍛ㄦ湡搴斾綔涓烘渶鑰佹寚浠や紭鍏堣繘鍏ヨ瘧鐮?鍙戝皠锛岃€屼笉鏄鏂板彇鎸囧寘瑕嗙洊銆?
+## EX 妯″潡
+
+EX 妯″潡璐熻矗鎵ц ID/EX 娴佹按瀵勫瓨鍣ㄤ紶鍏ョ殑鍙屽彂鎸囦护锛屽畬鎴?ALU 杩愮畻銆佽瀛樺湴鍧€璁＄畻銆佸垎鏀垽鏂€丣ALR 鐩爣璁＄畻銆丆SR 鎿嶄綔璇锋眰鐢熸垚銆丅PU 鏇存柊淇℃伅鐢熸垚锛屽苟杈撳嚭 EX/MEM 娴佹按瀵勫瓨鍣ㄥ唴瀹广€?
+ALU 涓嶆槸鐙珛娴佹按绾э紝鑰屾槸 EX 绾у唴閮ㄧ殑鎵ц鍗曞厓銆傚弻鍙戦『搴忔牳涓?EX 鑷冲皯瀹炰緥鍖?2 涓?ALU锛屽垎鍒湇鍔℃Ы 0 鍜屾Ы 1銆?
+### 鍐呴儴寤鸿妯″潡
+
+| 瀛愭ā鍧?閫昏緫 | 璇存槑 |
+| --- | --- |
+| `ALU0` / `ALU1` | 涓や釜骞惰 ALU锛屽垎鍒鐞嗘Ы 0 鍜屾Ы 1銆?|
+| 鎿嶄綔鏁伴€夋嫨閫昏緫 | 鏍规嵁 `op1Sel/op2Sel` 閫夋嫨 `rs1/rs2/pc/imm/pc+4` 绛夋搷浣滄暟銆?|
+| 鍒嗘敮姣旇緝閫昏緫 | 鏍规嵁 `brType` 鍒ゆ柇鏉′欢鍒嗘敮鏄惁璺宠浆銆?|
+| 鍒嗘敮鐩爣璁＄畻閫昏緫 | 鏉′欢鍒嗘敮鐩爣涓?`pc + imm`锛宖all-through 涓?`pc + 4`銆?|
+| JALR 鐩爣璁＄畻閫昏緫 | JALR 鐩爣涓?`(rs1 + imm) & ~1`锛屽湪 EX 绾т骇鐢?redirect銆?|
+| CSR 鎵ц閫昏緫 | 鐢熸垚 CSR 鍐欒姹傦紝骞舵妸 CSR 鏃у€间紶鍏ュ悗缁啓鍥炶矾寰勩€?|
+| BPU 鏇存柊閫昏緫 | 浣跨敤 EX 寰楀埌鐨勭湡瀹炲垎鏀柟鍚戝拰鐩爣鏇存柊 BPU銆?|
+| Redirect 鍒ゆ柇閫昏緫 | 姣旇緝鐪熷疄 next PC 涓庨娴?next PC锛屽彂鐜拌棰勬祴鏃堕€氱煡 IF flush/redirect銆?|
+| EX/MEM 鎵撳寘閫昏緫 | 灏?ALU 缁撴灉銆佽瀛樻帶鍒躲€佸啓鍥炴帶鍒躲€丆SR 缁撴灉绛夋墦鍖呯粰 MEM 绾с€?|
+
+### 鏆撮湶鎺ュ彛璇存槑
+
+| 淇″彿鍚?| 浣嶅/绫诲瀷 | 鏂瑰悜 | 璇存槑 |
+| --- | --- | --- | --- |
+| `in` | `Vec(2, IDEXBundle)` | Input | 鏉ヨ嚜 ID/EX 娴佹按瀵勫瓨鍣ㄧ殑鍙屽彂璇戠爜缁撴灉銆?|
+| `stallEx` | `Bool` | Input | EX 绾у仠椤夸俊鍙枫€備负 1 鏃?EX/MEM 娴佹按瀵勫瓨鍣ㄤ繚鎸佷笉鍙樸€?|
+| `flushEx` | `Bool` | Input | EX 绾у啿鍒蜂俊鍙枫€備负 1 鏃跺綋鍓?EX 杈撳嚭鍙樹负 bubble锛屼笉鍏佽鍐欏瘎瀛樺櫒銆佽瀛樸€佸啓 CSR 鎴栨洿鏂?BPU銆?|
+| `rs1Data` | `Vec(2, UInt(32.W))` | Input | 缁忚繃鏃佽矾缃戠粶淇鍚庣殑 rs1 鏁版嵁銆?|
+| `rs2Data` | `Vec(2, UInt(32.W))` | Input | 缁忚繃鏃佽矾缃戠粶淇鍚庣殑 rs2 鏁版嵁銆?|
+| `op1Data` | `Vec(2, UInt(32.W))` | Input | ALU 鎿嶄綔鏁?1锛岄€氬父鐢辨梺璺悗鐨?rs1銆丳C 鎴?0 閫夋嫨寰楀埌銆?|
+| `op2Data` | `Vec(2, UInt(32.W))` | Input | ALU 鎿嶄綔鏁?2锛岄€氬父鐢辨梺璺悗鐨?rs2銆佺珛鍗虫暟鎴?`PC+4` 閫夋嫨寰楀埌銆?|
+| `storeData` | `Vec(2, UInt(32.W))` | Input | Store 鎸囦护鍐欏叆鍐呭瓨鐨勬暟鎹紝搴斾娇鐢ㄦ梺璺悗鐨?rs2 鏁版嵁銆?|
+| `csrOpValid` | `Bool` | Output | 褰撳墠鍛ㄦ湡鏄惁鏈?CSR 鎿嶄綔璇锋眰銆傚熀纭€瀹炵幇寤鸿鍚屽懆鏈熸渶澶氫竴鏉?CSR 鎸囦护杩涘叆 EX銆?|
+| `csrOpType` | `UInt(2.W)` | Output | CSR 鎿嶄綔绫诲瀷锛屽搴?`CSROp.WRITE/SET/CLEAR`銆備富绾胯嚦灏戦渶瑕佹敮鎸?`CSROp.WRITE`銆?|
+| `csrWaddr` | `UInt(12.W)` | Output | CSR 鍐欏湴鍧€銆?|
+| `csrWdata` | `UInt(32.W)` | Output | CSR 鍐欏叆鐨勬柊鍊笺€傚 `csrrw` 鏉ヨ閫氬父涓烘梺璺悗鐨?rs1 鏁版嵁銆?|
+| `csrOldData` | `UInt(32.W)` | Input | CSR 鍐欏叆鍓嶇殑鏃у€硷紝鐢ㄤ簬鍚庣画鍐欏洖 rd銆?|
+| `exRedirectValid` | `Bool` | Output | EX 绾?redirect 鏈夋晥淇″彿銆傜敤浜庡垎鏀棰勬祴淇銆丣ALR 鏀瑰悜绛夈€?|
+| `exRedirectPc` | `UInt(32.W)` | Output | EX 绾?redirect 鐩爣 PC銆?|
+| `bpuUpdateValid` | `Bool` | Output | BPU 鏇存柊鏈夋晥淇″彿銆傛潯浠跺垎鏀湪 EX 寰楀埌鐪熷疄缁撴灉鍚庢洿鏂?BPU銆?|
+| `bpuUpdatePc` | `UInt(32.W)` | Output | 闇€瑕佹洿鏂扮殑鍒嗘敮鎸囦护 PC銆?|
+| `bpuUpdateTaken` | `Bool` | Output | 鍒嗘敮鐪熷疄鏂瑰悜銆備负 1 琛ㄧず瀹為檯璺宠浆銆?|
+| `bpuUpdateTarget` | `UInt(32.W)` | Output | 鍒嗘敮鐪熷疄鐩爣鍦板潃銆?|
+| `exValid` | `Vec(2, Bool)` | Output | 褰撳墠 EX 鍚勬Ы鏄惁鏈夋晥锛屼緵 HazardUnit/BypassUnit 浣跨敤銆?|
+| `exMemRen` | `Vec(2, Bool)` | Output | 褰撳墠 EX 鍚勬Ы鏄惁涓?load 鎸囦护锛岀敤浜?load-use stall 妫€娴嬨€?|
+| `exRdAddr` | `Vec(2, UInt(5.W))` | Output | 褰撳墠 EX 鍚勬Ы鐨勭洰鐨勫瘎瀛樺櫒鍦板潃銆?|
+| `exRfWen` | `Vec(2, Bool)` | Output | 褰撳墠 EX 鍚勬Ы鏄惁浼氬啓閫氱敤瀵勫瓨鍣ㄣ€?|
+| `exResult` | `Vec(2, UInt(32.W))` | Output | EX 绾?ALU 缁撴灉锛岀敤浜庢梺璺€傛敞鎰?load 鎸囦护鐨勮鍊兼槸璁垮瓨鍦板潃锛屼笉鏄?load 鏁版嵁銆?|
+| `out` | `Vec(2, EXMEMBundle)` | Output | EX 鍒?MEM 鐨勫弻鍙戞祦姘磋緭鍑恒€?|
+
+### ALU 鎿嶄綔鏁拌涔?
+EX 绾?ALU 杈撳叆寤鸿鐢辨梺璺崟鍏冨畬鎴愰€夋嫨鍚庨€佸叆 EX锛?
+| 淇″彿 | 璇存槑 |
+| --- | --- |
+| `rs1Data` | 鏃佽矾淇鍚庣殑 rs1 鍊硷紝鐢ㄤ簬鍒嗘敮姣旇緝銆丣ALR銆丆SR 鍐欐暟鎹瓑銆?|
+| `rs2Data` | 鏃佽矾淇鍚庣殑 rs2 鍊硷紝鐢ㄤ簬鍒嗘敮姣旇緝銆?|
+| `op1Data` | 宸叉牴鎹?`op1Sel` 閫夋嫨瀹屾垚鐨?ALU 杈撳叆 1銆?|
+| `op2Data` | 宸叉牴鎹?`op2Sel` 閫夋嫨瀹屾垚鐨?ALU 杈撳叆 2銆?|
+| `storeData` | Store 鍐欏唴瀛樻暟鎹紝蹇呴』鏄梺璺悗鐨?rs2 鍊笺€?|
+
+ALU 杩炴帴鏂瑰紡锛?
+```scala
+alu(i).io.op1   := op1Data(i)
+alu(i).io.op2   := op2Data(i)
+alu(i).io.aluOp := in(i).aluOp
+```
+
+### 鍒嗘敮涓?Redirect 璇箟
+
+鏉′欢鍒嗘敮鍦?EX 绾цВ鏋愮湡瀹炴柟鍚戯細
+
+| `brType` | 鍒ゆ柇鏉′欢 |
+| --- | --- |
+| `BR_EQ` | `rs1Data === rs2Data` |
+| `BR_NE` | `rs1Data =/= rs2Data` |
+| `BR_LT` | `rs1Data.asSInt < rs2Data.asSInt` |
+| `BR_GE` | `rs1Data.asSInt >= rs2Data.asSInt` |
+| `BR_LTU` | `rs1Data < rs2Data` |
+| `BR_GEU` | `rs1Data >= rs2Data` |
+
+鍒嗘敮鐩爣涓庨『搴忕洰鏍囷細
+
+```scala
+val branchTarget = pc + imm
+val fallThrough  = pc + 4.U
+val actualNextPc = Mux(branchTaken, branchTarget, fallThrough)
+```
+
+JALR 鐩爣锛?
+```scala
+val jalrTarget = (rs1Data + imm) & "hfffffffe".U
+```
+
+EX 绾у簲姣旇緝鐪熷疄 next PC 涓?IF 绾ч娴?next PC銆傝嫢涓嶄竴鑷达紝鍒欎骇鐢?redirect锛?
+```scala
+val mispred = actualNextPc =/= predNextPc
+exRedirectValid := mispred
+exRedirectPc    := actualNextPc
+```
+
+鍥犳寤鸿 `IDEXBundle` 鍚庣画琛ュ厖浠?IF/ID 浼犱笅鏉ョ殑棰勬祴瀛楁锛?
+| 瀛楁 | 璇存槑 |
+| --- | --- |
+| `predTaken` | IF 绾ч娴嬫柟鍚戙€?|
+| `predTarget` | IF 绾ч娴嬬洰鏍囥€?|
+| `predNextPc` | IF 绾у疄闄呴€夋嫨鐨勪笅涓€ PC銆?|
+
+### CSR 鎵ц璇箟
+
+鍩虹涓荤嚎鑷冲皯鏀寔 `csrrw`锛?
+```text
+CSR[csr] <- rs1
+rd       <- old CSR value
+```
+
+EX 绾х敓鎴?CSR 鍐欒姹傦細
+
+```scala
+csrOpValid := slotValid && in(i).csrOp =/= CSROp.NONE
+csrOpType  := in(i).csrOp
+csrWaddr   := in(i).csrAddr
+csrWdata   := rs1Data(i)
+```
+
+CSR 鏃у€?`csrOldData` 搴旇繘鍏?EX/MEM 鐨?`csrRdata`锛屽悗缁?WB 鏍规嵁 `wbSel=WB_CSR` 鍐欏洖 rd銆?
+濡傛灉涓や釜妲藉悓鍛ㄦ湡閮芥槸 CSR 鎸囦护锛屽熀纭€瀹炵幇搴斿湪 ID 绾ч樆姝㈡Ы 1 鍙戝皠锛岄伩鍏?EX 绾?CSR 鍐欑鍙ｅ啿绐併€?
+### 鍙屽彂鎺у埗娴佺害鏉?
+涓洪檷浣?redirect 浠茶澶嶆潅搴︼紝鍩虹椤哄簭鏍稿缓璁噰鐢ㄤ繚瀹堣鍒欙細
+
+| 鎯呭喌 | 寤鸿澶勭悊 |
+| --- | --- |
+| 妲?0 鏄?branch/JAL/JALR | 妲?1 鍦?ID 绾у彉涓?bubble锛屾垨鑷冲皯涓嶅厑璁告Ы 1 鍐嶄骇鐢?redirect銆?|
+| 妲?1 鏄?branch/JAL/JALR锛屾Ы 0 鏄櫘閫氭寚浠?| 鍙互鍏佽妲?1 杩涘叆 EX銆?|
+| 涓や釜妲介兘鍙兘浜х敓 redirect | 妲?0 浼樺厛锛屽洜涓烘Ы 0 绋嬪簭搴忔洿鑰併€?|
+
+褰撳墠 ID 绾у凡缁忚瀹氬唴閮?RAW 鏃舵Ы 1 闄嶇骇锛屽洜姝?EX 涓嶉渶瑕佸疄鐜版Ы 0 鍒版Ы 1 鐨勫悓鍛ㄦ湡鏃佽矾銆?
+### EX 杈撳嚭鏈夋晥鎬?
+鎺ㄨ崘姣忔Ы EX 鏈夋晥淇″彿锛?
+```scala
+val exSlotValid =
+  in(i).ctrl.valid &&
+  !in(i).ctrl.kill &&
+  !flushEx
+```
+
+褰?`exSlotValid=false` 鏃讹紝EX/MEM 杈撳嚭蹇呴』涓哄畨鍏?bubble锛岃嚦灏戜繚璇侊細
+
+```scala
+out(i).ctrl.valid := false.B
+out(i).rfWen  := false.B
+out(i).memRen := false.B
+out(i).memWen := false.B
+out(i).brType := BrType.BR_NONE
+```
+
+### EX/MEM 鎵撳寘瀛楁璇箟
+
+| 瀛楁 | 璇存槑 |
+| --- | --- |
+| `pc` | 褰撳墠鎸囦护 PC銆?|
+| `inst` | 褰撳墠鎸囦护缂栫爜锛屼富瑕佺敤浜庤皟璇曘€?|
+| `aluOut` | ALU 缁撴灉銆傚 load/store 鏄瀛樺湴鍧€锛涘鏅€?ALU 鎸囦护鏄繍绠楃粨鏋溿€?|
+| `rs2Data` | Store 鍐欏唴瀛樻暟鎹紝寤鸿濉叆鏃佽矾鍚庣殑 `storeData`銆?|
+| `rdAddr` | 鐩殑瀵勫瓨鍣ㄥ湴鍧€銆?|
+| `wbSel` | WB 闃舵鍐欏洖鏁版嵁鏉ユ簮閫夋嫨銆?|
+| `rfWen` | 鏄惁鍐欓€氱敤瀵勫瓨鍣ㄣ€?|
+| `memRen` | 鏄惁涓?load銆?|
+| `memWen` | 鏄惁涓?store銆?|
+| `memWd` | 璁垮瓨瀹藉害锛寃ord/half/byte銆?|
+| `memSigned` | load 鏄惁绗﹀彿鎵╁睍銆?|
+| `csrRdata` | CSR 鏃у€硷紝鐢ㄤ簬 `WB_CSR` 鍐欏洖銆?|
+| `ctrl` | 娴佹按鎺у埗淇℃伅銆?|
+
+## MEM 妯″潡
+
+MEM 妯″潡璐熻矗鎺ユ敹 EX/MEM 娴佹按瀵勫瓨鍣ㄤ腑鐨勫弻鍙戠粨鏋滐紝瀹屾垚 load/store 璁块棶銆丏-Cache 鎺ュ叆銆乵time MMIO 璇汇€乸rintf 鍦板潃杈撳嚭锛屼互鍙婂悜 MEM/WB 鎵撳寘鍐欏洖鏁版嵁銆?
+褰撳墠 `DCacheTop` 宸茬粡鍦?`src/main/Dcache` 涓疄鐜帮紝MEM 妯″潡闇€瑕侀€傞厤瀹冪殑鐪熷疄鎺ュ彛銆俙DCacheTop` 褰撳墠鏄崟绔彛鏁版嵁 cache锛屽洜姝ゅ熀纭€椤哄簭鏍稿缓璁悓鍛ㄦ湡鏈€澶氬厑璁镐竴鏉¤瀛樻寚浠よ繘鍏?MEM锛涘鏋滀袱涓Ы鍚屾椂鏄?load/store锛屽簲鍦?ID 鎴?EX 涔嬪墠璁╄緝骞磋交妲藉彉涓?bubble锛屾垨鑰呭湪 MEM 鍐呴儴鍙湇鍔℃渶鑰佽瀛樺苟鍐荤粨娴佹按銆?
+### `DCacheTop` 閫傞厤鎺ュ彛
+
+`DCacheTop` 鐨勭湡瀹炴帴鍙ｅ涓嬶紝MEM 妯″潡搴旂洿鎺ヨ繛鎺ヨ繖浜涗俊鍙凤細
+
+| DCacheTop 淇″彿 | 浣嶅/绫诲瀷 | 鏂瑰悜锛堢浉瀵?DCache锛?| MEM 渚ц繛鎺ヨ涔?|
+| --- | --- | --- | --- |
+| `addr` | `UInt(p.ADDR_WIDTH.W)` | Input | 璁垮瓨鍦板潃锛屾潵鑷瀛樻Ы鐨?`EXMEMBundle.aluOut`銆?|
+| `flush` | `Bool` | Input | cache flush 淇″彿銆傚熀纭€鐗堝彲鎺ュ叏灞€ flush 鎴栧浐瀹氫负 0锛屽悗缁敤浜?cache 娓呯┖銆?|
+| `wen` | `Bool` | Input | store 浣胯兘锛屾潵鑷瀛樻Ы `memWen`銆?|
+| `wmask` | `UInt(p.WMASK_BITS.W)` | Input | store 瀛楄妭鍐欐帺鐮侊紝鐢卞湴鍧€浣庝綅鍜?`memWd` 鐢熸垚銆?|
+| `wdata` | `UInt(p.DATA_WIDTH.W)` | Input | store 鍐欐暟鎹紝鏉ヨ嚜 EX 绾т紶涓嬫潵鐨勬梺璺悗 `rs2Data/storeData`銆?|
+| `memRen` | `Bool` | Input | load 浣胯兘锛屾潵鑷瀛樻Ы `memRen`銆?|
+| `memWd` | `UInt(2.W)` | Input | 璁垮瓨瀹藉害锛岀洿鎺ユ潵鑷?`EXMEMBundle.memWd`銆?|
+| `signed` | `Bool` | Input | load 鏄惁绗﹀彿鎵╁睍锛岀洿鎺ユ潵鑷?`EXMEMBundle.memSigned`銆?|
+| `rdata` | `UInt(p.DATA_WIDTH.W)` | Output | load 璇诲嚭骞跺畬鎴愭墿灞曞悗鐨勬暟鎹紝閫佸叆瀵瑰簲妲界殑 `MEMWBBundle.memData`銆?|
+| `missOut` | `Bool` | Output | D-Cache miss/stall 鐘舵€侊紝鍙€?Hazard/Control 浣滀负 `dcacheStall`銆?|
+| `stall` | `Bool` | Output | 涓?`missOut` 璇箟涓€鑷达紝琛ㄧず D-Cache 姝ｅ湪澶勭悊 miss锛屾祦姘寸嚎搴斿喕缁撱€?|
+| `mtimeLo` | `UInt(p.DATA_WIDTH.W)` | Input | 鏉ヨ嚜 CSRFile 鐨?`mtimeLo`锛岀敤浜?DCache 鍐呴儴 MMIO 鍦板潃璇诲彇銆?|
+| `mtimeHi` | `UInt(p.DATA_WIDTH.W)` | Input | 鏉ヨ嚜 CSRFile 鐨?`mtimeHi`锛岀敤浜?DCache 鍐呴儴 MMIO 鍦板潃璇诲彇銆?|
+| `printChar` | `Valid(UInt(8.W))` | Output | printf 鍦板潃 store 浜х敓鐨勫瓧绗﹁緭鍑恒€?|
+| `mem` | `MemBusIO(p)` | IO | D-Cache miss/writeback/refill 浣跨敤鐨勫閮ㄥ唴瀛樻€荤嚎銆?|
+
+### MEM 鏆撮湶鎺ュ彛璇存槑
+
+| 淇″彿鍚?| 浣嶅/绫诲瀷 | 鏂瑰悜 | 璇存槑 |
+| --- | --- | --- | --- |
+| `in` | `Vec(2, EXMEMBundle)` | Input | 鏉ヨ嚜 EX/MEM 娴佹按瀵勫瓨鍣ㄧ殑鍙屽彂缁撴灉銆?|
+| `stallMem` | `Bool` | Input | MEM 绾у仠椤夸俊鍙枫€備负 1 鏃?MEM/WB 娴佹按瀵勫瓨鍣ㄤ繚鎸佷笉鍙樸€?|
+| `flushMem` | `Bool` | Input | MEM 绾у啿鍒蜂俊鍙枫€備负 1 鏃跺綋鍓?MEM 杈撳嚭搴斿彉涓?bubble锛屼笉鑳藉啓鍥炪€?|
+| `mtimeLo` | `UInt(32.W)` | Input | CSRFile 杈撳嚭鐨?mtime 浣?32 浣嶏紝閫忎紶缁?DCacheTop銆?|
+| `mtimeHi` | `UInt(32.W)` | Input | CSRFile 杈撳嚭鐨?mtime 楂?32 浣嶏紝閫忎紶缁?DCacheTop銆?|
+| `dcacheFlush` | `Bool` | Input | D-Cache flush 鎺у埗淇″彿銆傚熀纭€鐗堝彲鐢遍《灞傚浐瀹氫负 0銆?|
+| `dcacheStall` | `Bool` | Output | D-Cache miss/stall 鐘舵€侊紝閫佸線 Hazard/Control 瑙﹀彂鍏ㄦ祦姘村喕缁撱€?|
+| `printChar` | `Valid(UInt(8.W))` | Output | printf 鍦板潃 store 鐨勫瓧绗﹁緭鍑恒€?|
+| `dmem` | `MemBusIO(p)` | IO | D-Cache 瀵瑰鍐呭瓨鎬荤嚎銆?|
+| `out` | `Vec(2, MEMWBBundle)` | Output | MEM 鍒?WB 鐨勫弻鍙戞祦姘磋緭鍑恒€?|
+
+### MEM 鍐呴儴璁垮瓨妲介€夋嫨
+
+鐢变簬褰撳墠 D-Cache 鏄崟绔彛锛孧EM 姣忓懆鏈熷彧鑳藉悜 D-Cache 鍙戣捣涓€涓?load/store銆傛帹鑽愰€夋嫨绋嬪簭搴忔渶鑰佺殑鏈夋晥璁垮瓨妲斤細
+
+```scala
+val slot0Mem = in(0).ctrl.valid && (in(0).memRen || in(0).memWen)
+val slot1Mem = in(1).ctrl.valid && (in(1).memRen || in(1).memWen)
+
+val memSel0 = slot0Mem
+val memSel1 = !slot0Mem && slot1Mem
+```
+
+鍩虹瀹炵幇鏇存帹鑽愬湪 ID 闃舵绂佹鍙岃瀛樺悓鍙戯紝杩欐牱 MEM 涓笉浼氬嚭鐜?`slot0Mem && slot1Mem`銆傚鏋滀粛鐒跺嚭鐜帮紝搴斿綋浠ユЫ 0 涓哄噯锛屽苟瑙﹀彂娴佹按鍐荤粨鎴栨柇瑷€锛岄槻姝㈡Ы 1 璁垮瓨涓㈠け銆?
+### Store Mask 鐢熸垚
+
+MEM 绾ф牴鎹湴鍧€浣?2 浣嶅拰 `memWd` 鐢熸垚 DCache `wmask`锛?
+| 璁垮瓨瀹藉害 | `addr(1,0)` | `wmask` 璇箟 |
+| --- | --- | --- |
+| word | 浠绘剰锛岄€氬父瑕佹眰瀵归綈 | `1111` |
+| half | `00` | `0011` |
+| half | `10` | `1100` |
+| byte | `00` | `0001` |
+| byte | `01` | `0010` |
+| byte | `10` | `0100` |
+| byte | `11` | `1000` |
+
+鑻ヤ笉瀹炵幇绮剧‘寮傚父锛岄潪瀵归綈璁块棶鍙厛鎸夌‖浠惰嚜鐒舵帺鐮佸鐞嗘垨鍦ㄦ祴璇曚腑閬垮厤銆?
+### MEM/WB 鎵撳寘瑙勫垯
+
+| 杈撳叆绫诲瀷 | MEM/WB 瀛楁濉厖 |
+| --- | --- |
+| 鏅€?ALU/JAL/CSR 鎸囦护 | `memData := 0.U`锛屽叾浣欏啓鍥炰俊鎭粠 EX/MEM 閫忎紶銆?|
+| load 鎸囦护 | `memData := dcache.io.rdata`锛宍wbSel` 淇濇寔 `WB_MEM`銆?|
+| store 鎸囦护 | `rfWen := false.B`锛屼笉鍐欏洖閫氱敤瀵勫瓨鍣ㄣ€?|
+| bubble/flush | `ctrl.valid := false.B`锛宍rfWen := false.B`锛宍memData := 0.U`銆?|
+
+### MEM 鍋滈】璇箟
+
+褰?`dcache.io.stall` 鎴?`dcache.io.missOut` 涓?1 鏃讹細
+
+| 琛屼负 | 璇存槑 |
+| --- | --- |
+| `dcacheStall := true.B` | 閫氱煡 Hazard/Control銆?|
+| IF/ID/EX/MEM/WB | 鍩虹鐗堝缓璁叏娴佹按鍐荤粨锛岀洿鍒?D-Cache miss 瀹屾垚銆?|
+| MEM/WB | 淇濇寔鍘熷€硷紝涓嶆彁浜ゆ柊鐨?load 缁撴灉銆?|
+
+## WB 妯″潡
+
+WB 妯″潡璐熻矗浠?MEM/WB 娴佹按瀵勫瓨鍣ㄤ腑閫夋嫨鏈€缁堝啓鍥炴暟鎹紝椹卞姩 RegFile 鍐欑鍙ｏ紝骞朵骇鐢熸彁浜よ鏁颁俊鍙风粰 CSRFile銆?
+### 鏆撮湶鎺ュ彛璇存槑
+
+| 淇″彿鍚?| 浣嶅/绫诲瀷 | 鏂瑰悜 | 璇存槑 |
+| --- | --- | --- | --- |
+| `in` | `Vec(2, MEMWBBundle)` | Input | 鏉ヨ嚜 MEM/WB 娴佹按瀵勫瓨鍣ㄧ殑鍙屽彂缁撴灉銆?|
+| `regWen` | `Vec(2, Bool)` | Output | RegFile 鍐欎娇鑳姐€傛棤鏁堟Ы銆乣rd=x0` 鎴?`rfWen=0` 鏃跺繀椤讳负 0銆?|
+| `regWaddr` | `Vec(2, UInt(5.W))` | Output | RegFile 鍐欏湴鍧€銆?|
+| `regWdata` | `Vec(2, UInt(32.W))` | Output | RegFile 鍐欐暟鎹€?|
+| `instRetire` | `Vec(2, Bool)` | Output | 姣忎釜妲芥槸鍚︽垚鍔熼€€浼戯紝鐢ㄤ簬 CSRFile 缁熻 `minstret`銆?|
+| `wbValid` | `Vec(2, Bool)` | Output | 鍐欏洖妲芥湁鏁堜俊鍙凤紝渚?BypassUnit 浣跨敤銆?|
+| `wbRfWen` | `Vec(2, Bool)` | Output | 鍐欏洖妲芥槸鍚﹀啓閫氱敤瀵勫瓨鍣紝渚?BypassUnit 浣跨敤銆?|
+| `wbRdAddr` | `Vec(2, UInt(5.W))` | Output | 鍐欏洖鐩殑瀵勫瓨鍣ㄥ彿锛屼緵 BypassUnit 浣跨敤銆?|
+| `wbData` | `Vec(2, UInt(32.W))` | Output | 鍐欏洖鏁版嵁锛屼緵 BypassUnit 浣跨敤銆?|
+
+### 鍐欏洖鏁版嵁閫夋嫨
+
+WB 鏍规嵁 `wbSel` 閫夋嫨鍐欏洖鏁版嵁锛?
+| `wbSel` | 鍐欏洖鏁版嵁 |
+| --- | --- |
+| `WB_ALU` | `aluOut` |
+| `WB_MEM` | `memData` |
+| `WB_PC4` | `pc + 4` |
+| `WB_CSR` | `csrRdata` |
+
+鎺ㄨ崘缁勫悎閫昏緫锛?
+```scala
+val wbData = MuxLookup(in(i).wbSel, in(i).aluOut, Seq(
+  WbSel.WB_ALU -> in(i).aluOut,
+  WbSel.WB_MEM -> in(i).memData,
+  WbSel.WB_PC4 -> (in(i).pc + 4.U),
+  WbSel.WB_CSR -> in(i).csrRdata
+))
+```
+
+### 鍙屽啓绔彛璇箟
+
+RegFile 鏀寔鍙屽啓绔彛鏃讹紝WB 涓や釜妲藉彲鍚屾椂鍐欏洖銆傝嫢妲?0 鍜屾Ы 1 鍚屽懆鏈熷啓鍚屼竴涓潪闆?`rd`锛屽繀椤讳繚璇佺▼搴忓簭鏇村勾杞荤殑妲?1 鏈€缁堝彲瑙併€?
+| 鎯呭喌 | 澶勭悊 |
+| --- | --- |
+| `rd=x0` | 鍐欎娇鑳藉己鍒朵负 0銆?|
+| 妲?0銆佹Ы 1 鍐欎笉鍚?rd | 涓や釜鍐欑鍙ｅ悓鏃跺啓銆?|
+| 妲?0銆佹Ы 1 鍐欏悓涓€闈為浂 rd | 妲?1 浼樺厛锛孯egFile 鍐呴儴鎴?WB 鍐欑鍙ｄ徊瑁佸繀椤讳繚璇佹Ы 1 瑕嗙洊妲?0銆?|
+
+### 閫€浼戣鏁拌涔?
+`instRetire(i)` 寤鸿瀹氫箟涓猴細
+
+```scala
+instRetire(i) := in(i).ctrl.valid && !in(i).ctrl.kill
+```
+
+濡傛灉鍚庣画鍔犲叆寮傚父銆侀樆濉炴彁浜ゆ垨绮剧‘閫€浼戯紝鍐嶆妸璇ュ畾涔夋敹绱с€傚綋鍓嶈绋嬭姹備笉瀹炵幇绮剧‘寮傚父锛屽洜姝ゅ熀纭€鐗堝彲鎸?WB 鏈夋晥妲借鏁般€?
+## RegFile 妯″潡
+
+RegFile 鏄?32 涓?32 浣嶉€氱敤瀵勫瓨鍣ㄦ枃浠讹紝鏈嶅姟鍙屽彂 ID 璇诲拰鍙屽彂 WB 鍐欍€?
+### 鏆撮湶鎺ュ彛璇存槑
+
+| 淇″彿鍚?| 浣嶅/绫诲瀷 | 鏂瑰悜 | 璇存槑 |
+| --- | --- | --- | --- |
+| `rs1Addr` | `Vec(2, UInt(5.W))` | Input | 涓や釜妲界殑 rs1 璇诲湴鍧€銆?|
+| `rs2Addr` | `Vec(2, UInt(5.W))` | Input | 涓や釜妲界殑 rs2 璇诲湴鍧€銆?|
+| `rs1Data` | `Vec(2, UInt(32.W))` | Output | 涓や釜妲界殑 rs1 璇绘暟鎹€?|
+| `rs2Data` | `Vec(2, UInt(32.W))` | Output | 涓や釜妲界殑 rs2 璇绘暟鎹€?|
+| `wen` | `Vec(2, Bool)` | Input | 涓や釜鍐欑鍙ｇ殑鍐欎娇鑳斤紝鏉ヨ嚜 WB銆?|
+| `waddr` | `Vec(2, UInt(5.W))` | Input | 涓や釜鍐欑鍙ｇ殑鍐欏湴鍧€銆?|
+| `wdata` | `Vec(2, UInt(32.W))` | Input | 涓や釜鍐欑鍙ｇ殑鍐欐暟鎹€?|
+
+### RegFile 璇箟绾﹀畾
+
+| 瑙勫垯 | 璇存槑 |
+| --- | --- |
+| `x0` 鎭掍负 0 | 璇?`x0` 蹇呴』杩斿洖 0锛屽啓 `x0` 蹇呴』蹇界暐銆?|
+| 鍙岃鍙屽啓 | 鍙屽彂闇€瑕?4 涓绔彛鍜?2 涓啓绔彛銆?|
+| 鍚屽懆鏈熻鍐欏悓涓€瀵勫瓨鍣?| 寤鸿瀹炵幇 write-first 鎴栧湪 ID/EX 鏃佽矾涓鐩栵紝淇濊瘉璇诲埌鏈€鏂板彲瑙佸€笺€?|
+| 鍙屽啓鍚屼竴瀵勫瓨鍣?| 鑻ヤ袱涓啓绔彛鍐欏悓涓€闈為浂瀵勫瓨鍣紝妲?1 浼樺厛銆?|
+
+鎺ㄨ崘鍙屽啓浼樺厛绾э細
+
+```scala
+when(wen(0) && waddr(0) =/= 0.U) {
+  regs(waddr(0)) := wdata(0)
+}
+when(wen(1) && waddr(1) =/= 0.U) {
+  regs(waddr(1)) := wdata(1)
+}
+```
+
+杩欐牱褰撲袱涓鍙ｅ啓鍚屼竴鍦板潃鏃讹紝鍚庡啓鐨勬Ы 1 瑕嗙洊妲?0銆?
+## CSRFile 妯″潡
+
+CSRFile 璐熻矗瀹炵幇鍩虹 CSR銆佹€ц兘璁℃暟鍣ㄣ€乵time 璁℃暟鍣ㄥ拰棰勫彇寮€鍏炽€傚綋鍓嶆簮鐮佷腑鐨?`CSRFile` 宸茬粡鍖呭惈 `mcycle`銆乣mcycleh`銆乣minstret`銆乣mcountinhibit`銆乣misa`銆乣prefetchCtrl`銆乣mtimeLo/mtimeHi`銆?
+### 鏆撮湶鎺ュ彛璇存槑
+
+| 淇″彿鍚?| 浣嶅/绫诲瀷 | 鏂瑰悜 | 璇存槑 |
+| --- | --- | --- | --- |
+| `raddr` | `UInt(12.W)` | Input | CSR 璇诲湴鍧€銆傚熀纭€瀹炵幇鍙湁涓€涓绔彛锛屽洜姝?ID 闃舵搴旈檺鍒跺悓鍛ㄦ湡鏈€澶氫竴鏉?CSR 鎸囦护銆?|
+| `rdata` | `UInt(32.W)` | Output | CSR 璇绘暟鎹€?|
+| `opValid` | `Bool` | Input | EX 绾?CSR 鎿嶄綔鏈夋晥淇″彿銆?|
+| `opType` | `UInt(2.W)` | Input | CSR 鎿嶄綔绫诲瀷锛屼娇鐢?`CSROp.WRITE/SET/CLEAR`銆備富绾胯嚦灏戦渶瑕?`CSROp.WRITE`銆?|
+| `waddr` | `UInt(12.W)` | Input | CSR 鍐欏湴鍧€銆?|
+| `wdata` | `UInt(32.W)` | Input | CSR 鍐欐暟鎹€?|
+| `oldData` | `UInt(32.W)` | Output | CSR 鍐欏叆鍓嶆棫鍊硷紝鐢ㄤ簬 `csrrw` 鍐欏洖 rd銆?|
+| `cycleTick` | `Bool` | Input | 鍛ㄦ湡璁℃暟浣胯兘銆備负 1 涓?`mcountinhibit(0)=0` 鏃讹紝`mcycle` 鑷銆?|
+| `instRetire` | `Vec(2, Bool)` | Input | WB 闃舵姣忔Ы閫€浼戜俊鍙凤紝鐢ㄤ簬鏇存柊 `minstret`銆?|
+| `mcycleLo` | `UInt(32.W)` | Output | `mcycle` 浣?32 浣嶃€?|
+| `mcycleHi` | `UInt(32.W)` | Output | `mcycle` 楂?32 浣嶃€?|
+| `minstretLo` | `UInt(32.W)` | Output | `minstret` 浣?32 浣嶃€?|
+| `mtimeLo` | `UInt(32.W)` | Output | `mtime` 浣?32 浣嶏紝閫?DCacheTop 澶勭悊 MMIO 璇汇€?|
+| `mtimeHi` | `UInt(32.W)` | Output | `mtime` 楂?32 浣嶏紝閫?DCacheTop 澶勭悊 MMIO 璇汇€?|
+| `prefetchCtrl` | `UInt(32.W)` | Output | 棰勫彇鎺у埗 CSR銆俙bit0` 鎺у埗 next-line锛宍bit1` 鎺у埗 stride銆?|
+
+### CSR 鍦板潃绾﹀畾
+
+| CSR | 鍦板潃 | 璇存槑 |
+| --- | --- | --- |
+| `mcycle` | `0xB00` | 鍛ㄦ湡璁℃暟浣?32 浣嶃€?|
+| `mcycleh` | `0xB80` | 鍛ㄦ湡璁℃暟楂?32 浣嶃€?|
+| `minstret` | `0xB02` | 閫€浼戞寚浠よ鏁颁綆 32 浣嶃€?|
+| `mcountinhibit` | `0x320` | 璁℃暟鍣ㄦ姂鍒舵帶鍒躲€?|
+| `misa` | `0x301` | ISA 淇℃伅锛屽彧璇汇€?|
+| `prefetchCtrl` | `0x7C0` | 鑷畾涔夐鍙栨帶鍒?CSR銆?|
+
+### 棰勫彇鎺у埗浣?
+| 浣?| 鍚嶇О | 璇存槑 |
+| --- | --- | --- |
+| `prefetchCtrl(0)` | `nextLinePrefetchEn` | 涓?1 鏃跺厑璁?next-line 棰勫彇鍣ㄥ彂璧疯姹傘€?|
+| `prefetchCtrl(1)` | `stridePrefetchEn` | 涓?1 鏃跺厑璁?stride 棰勫彇鍣ㄥ彂璧疯姹傘€?|
+
+### `csrrw` 璇箟
+
+涓荤嚎鑷冲皯闇€瑕佹敮鎸侊細
+
+```text
+old = CSR[csr]
+CSR[csr] = rs1
+rd = old
+```
+
+EX 绾у簲鎶?`rs1Data` 浣滀负 `wdata`锛孋SRFile 杈撳嚭 `oldData`锛岄殢鍚?WB 閫氳繃 `WB_CSR` 鍐欏洖 `rd`銆?
+### CSR 鍙屽彂闄愬埗
+
+鐢变簬褰撳墠 CSRFile 鍙湁涓€涓绔彛鍜屼竴涓啓璇锋眰绔彛锛屽熀纭€椤哄簭鏍稿簲鍦?ID 绾ч檺鍒跺悓鍛ㄦ湡鏈€澶氫竴鏉?CSR 鎸囦护杩涘叆 EX銆傝嫢妲?0 鍜屾Ы 1 閮芥槸 CSR 鎸囦护锛屽簲鍙彂灏勬Ы 0锛屾Ы 1 涓嬩竴鍛ㄦ湡閲嶆柊灏濊瘯銆?
+```
+
+## src\main\Frontend\BPU.scala
 ```scala
 package riscv
 
@@ -2549,7 +3114,6 @@ class BPU extends Module {
 ```
 
 ## src\main\Frontend\BPU_RAS.scala
-
 ```scala
 package riscv
 
@@ -2672,7 +3236,6 @@ class BPU_RAS extends Module {
 ```
 
 ## src\main\Frontend\NextLinePrefetcher.scala
-
 ```scala
 package riscv
 
@@ -2723,7 +3286,6 @@ class NextLinePrefetcher extends Module {
 ```
 
 ## src\main\Frontend\PcGen.scala
-
 ```scala
 package riscv
 
@@ -2763,6 +3325,7 @@ class PcGen(
     // 鈹€鈹€ 娴佹按绾垮仠椤?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     // stallIf 鏉ヨ嚜 HazardUnit锛汭-Cache miss 浜х敓鐨?icacheStall
     // 涔熼渶閫氳繃 HazardUnit 姹囨€诲悗閫佸叆姝や俊鍙?    val stallIf = Input(Bool())
+    val fetchSlot1Valid = Input(Bool())
 
     // 鈹€鈹€ 杈撳嚭 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     val currPc  = Output(UInt(32.W)) // 褰撳墠 PC锛堚啋 debugPc / 棰勫彇鍣?currAddr锛?    val pcFetch = Output(UInt(32.W)) // 閫佸線 I-Cache 鐨勫彇鎸囧湴鍧€
@@ -2770,6 +3333,7 @@ class PcGen(
 
   val pcReg  = RegInit(resetVec.U(32.W))
   val nextPc = Wire(UInt(32.W))
+  val seqStep = Mux(io.fetchSlot1Valid, (N * 4).U(32.W), 4.U(32.W))
 
   // 鈹€鈹€ 浼樺厛绾т徊瑁侊紙when 閾撅紝楂樹紭鍏堢骇鍦ㄥ墠锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   when(io.exRedirectValid) {
@@ -2782,8 +3346,7 @@ class PcGen(
   }.elsewhen(io.bpuPredTaken) {
     // BPU 棰勬祴璺宠浆锛氶噰鐢ㄩ娴嬬洰鏍?    nextPc := io.bpuPredTarget
   }.otherwise {
-    // 榛樿锛氶『搴忓彇鎸囷紝鍙屽彂灏勬闀?N*4
-    nextPc := pcReg + (N * 4).U
+    // 榛樿锛氶『搴忓彇鎸囥€傝嫢 PC 浠?4B 瀵归綈锛屽綋鍓嶅寘鍙兘鏈夋晥杩斿洖 slot0锛?    // 涓嬩竴鎷嶅繀椤?PC+4锛屼笉鑳芥寜鍙屽彂瀹藉害璺宠繃 slot1 浣嶇疆鐨勬寚浠ゃ€?    nextPc := pcReg + seqStep
   }
 
   pcReg := nextPc
@@ -2794,7 +3357,6 @@ class PcGen(
 ```
 
 ## src\main\Frontend\TAGE.scala
-
 ```scala
 package riscv
 
@@ -3112,7 +3674,6 @@ class TAGE extends Module {
 ```
 
 ## src\main\Icache\ICacheMissFSM.scala
-
 ```scala
 package icache
 
@@ -3268,7 +3829,6 @@ class ICacheMissFSM(p: CacheParams) extends Module {
 ```
 
 ## src\main\Icache\ICacheParams.scala
-
 ```scala
 package icache
 
@@ -3286,7 +3846,6 @@ class ITagEntry(p: CacheParams) extends Bundle {
 ```
 
 ## src\main\Icache\ICacheTop.scala
-
 ```scala
 package icache
 
@@ -3463,7 +4022,6 @@ object ICacheTop {
 ```
 
 ## src\main\Icache\IDataArray.scala
-
 ```scala
 package icache
 
@@ -3508,7 +4066,6 @@ class IDataArray(p: CacheParams) extends Module {
 ```
 
 ## src\main\Icache\IHitTest.scala
-
 ```scala
 package icache
 
@@ -3545,7 +4102,6 @@ class IHitTest(p: CacheParams) extends Module {
 ```
 
 ## src\main\Icache\InstSelect.scala
-
 ```scala
 package icache
 
@@ -3580,7 +4136,6 @@ class InstSelect(p: CacheParams) extends Module {
 ```
 
 ## src\main\Icache\ITagArray.scala
-
 ```scala
 package icache
 
@@ -3629,7 +4184,6 @@ class ITagArray(p: CacheParams) extends Module {
 ```
 
 ## src\main\Memory\mem.scala
-
 ```scala
 package riscv
 
@@ -3699,7 +4253,6 @@ class RV32DualPortMemory(
 ```
 
 ## src\main\Top.scala
-
 ```scala
 package riscv
 

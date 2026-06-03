@@ -150,14 +150,15 @@ test_branch:
     /* ────────────────────────────────────────────────────────────
      * JAL – forward jump, rd = PC+4
      * ──────────────────────────────────────────────────────────── */
-    /* jal t4, target  → t4 = (address of next instruction after jal) */
+    /* jal t4, target  → t4 = PC+4 (the instruction immediately after jal) */
     jal  t4, .Ljal_target
+.Ljal_link:
     addi s0, s0, 1          /* must be skipped */
 .Ljal_after:
     j    .Ljal_continue
 .Ljal_target:
-    /* Verify t4 == address of .Ljal_after */
-    la   t5, .Ljal_after
+    /* Verify t4 == architectural link address, i.e. PC+4 */
+    la   t5, .Ljal_link
     beq  t4, t5, 1f
     addi s0, s0, 1
 1:

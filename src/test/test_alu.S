@@ -161,12 +161,12 @@ test_alu:
 
     /* ── AUIPC ────────────────────────────────────────────────── */
     /* AUIPC rd, 0 = put current PC into rd */
+_auipc_ref:
     auipc t2, 0
     /* t2 should equal the address of this AUIPC instruction */
     la   t3, _auipc_ref
     beq  t2, t3, 1f
     addi s0, s0, 1
-_auipc_ref:
 1:
 
     /* ── x0 write suppression ─────────────────────────────────── */

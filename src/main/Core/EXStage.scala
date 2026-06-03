@@ -75,14 +75,17 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
       (isBranch && branchTaken(i)) -> branchTarget(i)
     ))
 
-    redirect(i) := slotValid(i) &&
+    val killedByOlderRedirect = if (i == 0) false.B else redirect(0)
+    val slotLive = slotValid(i) && !killedByOlderRedirect
+
+    redirect(i) := slotLive &&
                    (isBranch || io.in(i).isJalr) &&
                    (actualNextPc(i) =/= io.in(i).predNextPc)
 
-    io.exValid(i)  := slotValid(i)
-    io.exMemRen(i) := slotValid(i) && io.in(i).memRen
+    io.exValid(i)  := slotLive
+    io.exMemRen(i) := slotLive && io.in(i).memRen
     io.exRdAddr(i) := io.in(i).rdAddr
-    io.exRfWen(i)  := slotValid(i) && io.in(i).rfWen
+    io.exRfWen(i)  := slotLive && io.in(i).rfWen
     io.exResult(i) := alus(i).io.result
 
     io.out(i) := 0.U.asTypeOf(new EXMEMBundle)
@@ -93,23 +96,26 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     io.out(i).rs2Data   := io.storeData(i)
     io.out(i).rdAddr    := io.in(i).rdAddr
     io.out(i).wbSel     := io.in(i).wbSel
-    io.out(i).rfWen     := slotValid(i) && io.in(i).rfWen
-    io.out(i).memRen    := slotValid(i) && io.in(i).memRen
-    io.out(i).memWen    := slotValid(i) && io.in(i).memWen
+    io.out(i).rfWen     := slotLive && io.in(i).rfWen
+    io.out(i).memRen    := slotLive && io.in(i).memRen
+    io.out(i).memWen    := slotLive && io.in(i).memWen
     io.out(i).memWd     := io.in(i).memWd
     io.out(i).memSigned := io.in(i).memSigned
     io.out(i).csrRdata  := io.csrOldData
-    io.out(i).csrOp     := Mux(slotValid(i), io.in(i).csrOp, CSROp.NONE)
-    io.out(i).brType    := Mux(slotValid(i), io.in(i).brType, BrType.BR_NONE)
-    io.out(i).isJump    := slotValid(i) && io.in(i).isJump
-    io.out(i).ctrl.valid   := slotValid(i)
-    io.out(i).ctrl.kill    := io.flushEx || io.in(i).ctrl.kill
+    io.out(i).csrOp     := Mux(slotLive, io.in(i).csrOp, CSROp.NONE)
+    io.out(i).brType    := Mux(slotLive, io.in(i).brType, BrType.BR_NONE)
+    io.out(i).isJump    := slotLive && io.in(i).isJump
+    io.out(i).ctrl.valid   := slotLive
+    io.out(i).ctrl.kill    := io.flushEx || io.in(i).ctrl.kill || killedByOlderRedirect
     io.out(i).ctrl.allowIn := true.B
   }
 
   // ── CSR operation ─────────────────────────────────────────────────────
-  val csrSlot0 = slotValid(0) && io.in(0).csrOp =/= CSROp.NONE
-  val csrSlot1 = slotValid(1) && io.in(1).csrOp =/= CSROp.NONE
+  val slot0Live = slotValid(0)
+  val slot1Live = slotValid(1) && !redirect(0)
+
+  val csrSlot0 = slot0Live && io.in(0).csrOp =/= CSROp.NONE
+  val csrSlot1 = slot1Live && io.in(1).csrOp =/= CSROp.NONE
   val csrIdx   = Mux(csrSlot0, 0.U, 1.U)
   io.csrOpValid := csrSlot0 || csrSlot1
   io.csrOpType  := Mux(csrSlot0, io.in(0).csrOp,  io.in(1).csrOp)
@@ -121,21 +127,16 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
   io.exRedirectPc    := Mux(redirect(0), actualNextPc(0), actualNextPc(1))
 
   // ── BPU update ────────────────────────────────────────────────────────
-  // P1 fix: JALR must also update the BPU/BTB so the predictor learns the
-  // indirect-call target.  Without this the BTB never converges and every
-  // JALR (function call/return) pays the full 2-cycle flush penalty forever.
-  //
   // Update source priority: slot 0 > slot 1 (slot 0 is the older instruction).
-  // If both slots trigger an update in the same cycle (extremely rare after
-  // the IDStage slot0Ctrl fix), slot 0 is recorded and slot 1 is silently
-  // dropped.  The dropped update will be re-trained on the next occurrence.
-  val br0   = slotValid(0) && io.in(0).brType =/= BrType.BR_NONE
-  val br1   = slotValid(1) && io.in(1).brType =/= BrType.BR_NONE
-  val jalr0 = slotValid(0) && io.in(0).isJalr
-  val jalr1 = slotValid(1) && io.in(1).isJalr
+  // Only conditional branches update the bi-mode BPU. JALR/ret targets are
+  // indirect and need a RAS or per-context predictor; training them into the
+  // simple BTB makes shared return sites such as _putchar.ret predict stale
+  // call-site addresses.
+  val br0   = slot0Live && io.in(0).brType =/= BrType.BR_NONE
+  val br1   = slot1Live && io.in(1).brType =/= BrType.BR_NONE
 
-  val isUpdate0 = br0 || jalr0
-  val isUpdate1 = br1 || jalr1
+  val isUpdate0 = br0
+  val isUpdate1 = br1
 
   io.bpuUpdateValid := isUpdate0 || isUpdate1
 
@@ -143,17 +144,14 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
 
   io.bpuUpdatePc := Mux(bpuFromSlot0, io.in(0).pc, io.in(1).pc)
 
-  // For JALR: always "taken" (unconditional jump).
-  // For branches: use the resolved branch outcome.
   io.bpuUpdateTaken := Mux(bpuFromSlot0,
-    Mux(jalr0, true.B, branchTaken(0)),
-    Mux(jalr1, true.B, branchTaken(1)))
+    branchTaken(0),
+    branchTaken(1))
 
-  // BTB target: for branches, always store the branch-target address (pc+imm)
-  // regardless of taken/not-taken, so the BTB is correct when the branch IS
-  // later taken.  For JALR, store the resolved indirect target.
-  val updateTarget0 = Mux(jalr0, jalrTarget(0), branchTarget(0))
-  val updateTarget1 = Mux(jalr1, jalrTarget(1), branchTarget(1))
+  // BTB target: always store the branch-target address (pc+imm) regardless of
+  // taken/not-taken, so the BTB is correct when the branch is later taken.
+  val updateTarget0 = branchTarget(0)
+  val updateTarget1 = branchTarget(1)
   io.bpuUpdateTarget := Mux(bpuFromSlot0, updateTarget0, updateTarget1)
 
 }

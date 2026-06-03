@@ -69,7 +69,7 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
     slotValid(0) &&
     dec(0).io.out.rfWen &&
     !dec(0).io.out.memRen &&                           // Load result not available in EX
-    (dec(0).io.out.wbSel =/= WbSel.WB_MEM) &&         // belt-and-suspenders
+    (dec(0).io.out.wbSel === WbSel.WB_ALU) &&         // only ALU results are available to F5
     (dec(0).io.out.rdAddr =/= 0.U)
 
   // ── Slot-1 stall conditions ────────────────────────────────────────────
@@ -87,6 +87,8 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   val slot1Mem = slotValid(1) && (dec(1).io.out.memRen || dec(1).io.out.memWen)
   val slot0Csr = slotValid(0) && dec(0).io.out.csrOp =/= CSROp.NONE
   val slot1Csr = slotValid(1) && dec(1).io.out.csrOp =/= CSROp.NONE
+  val slot1Ctrl = slotValid(1) &&
+                  (dec(1).io.out.isJump || (dec(1).io.out.brType =/= BrType.BR_NONE))
 
   // P1 fix: slot0Ctrl must block slot 1 only when slot 1 would be on the
   // wrong execution path, i.e.:
@@ -102,13 +104,16 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
                            eff(0).predTaken        // BPU predicted this branch as taken
   val slot0Ctrl = slot0IsJal || slot0IsJalr || slot0BranchTaken
 
-  val slot1Blocked = slotRaw01 || (slot0Mem && slot1Mem) || (slot0Csr && slot1Csr) || slot0Ctrl
+  val slot1DataOrResourceBlocked = slotRaw01 || (slot0Mem && slot1Mem) || (slot0Csr && slot1Csr)
+  val slot1ReplayBlocked = slot1DataOrResourceBlocked || slot1Ctrl
+  val slot1Blocked = slot1ReplayBlocked || slot0Ctrl
 
   val canIssue0 = slotValid(0) && !io.stallId && !io.flushId
   val canIssue1 = canIssue0 && slotValid(1) && !slot1Blocked
 
-  // Capture slot 1 for the next cycle when it is blocked
-  val capturePending = canIssue0 && slotValid(1) && !canIssue1 && !pendingValid
+  // Capture slot 1 only for replayable data/resource conflicts.  If slot 0 is
+  // a control-flow instruction, slot 1 is wrong-path and must be squashed.
+  val capturePending = canIssue0 && slotValid(1) && !slot0Ctrl && slot1ReplayBlocked && !pendingValid
   when(io.flushId) {
     pendingValid := false.B
   }.elsewhen(capturePending) {

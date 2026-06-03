@@ -46,6 +46,7 @@ class PcGen(
     // stallIf 来自 HazardUnit；I-Cache miss 产生的 icacheStall
     // 也需通过 HazardUnit 汇总后送入此信号
     val stallIf = Input(Bool())
+    val fetchSlot1Valid = Input(Bool())
 
     // ── 输出 ──────────────────────────────────────────────
     val currPc  = Output(UInt(32.W)) // 当前 PC（→ debugPc / 预取器 currAddr）
@@ -54,6 +55,7 @@ class PcGen(
 
   val pcReg  = RegInit(resetVec.U(32.W))
   val nextPc = Wire(UInt(32.W))
+  val seqStep = Mux(io.fetchSlot1Valid, (N * 4).U(32.W), 4.U(32.W))
 
   // ── 优先级仲裁（when 链，高优先级在前）────────────────────
   when(io.exRedirectValid) {
@@ -69,8 +71,9 @@ class PcGen(
     // BPU 预测跳转：采用预测目标
     nextPc := io.bpuPredTarget
   }.otherwise {
-    // 默认：顺序取指，双发射步长 N*4
-    nextPc := pcReg + (N * 4).U
+    // 默认：顺序取指。若 PC 仅 4B 对齐，当前包只能有效返回 slot0，
+    // 下一拍必须 PC+4，不能按双发宽度跳过 slot1 位置的指令。
+    nextPc := pcReg + seqStep
   }
 
   pcReg := nextPc

@@ -114,6 +114,10 @@ test_csr:
     addi  t1, t1,   1       /* retire 6 */
     addi  t1, t1,   1       /* retire 7 */
     addi  t1, t1,   1       /* retire 8 */
+    nop
+    nop
+    nop
+    nop
     csrr  t2, CSR_MINSTRET
     sub   t3, t2, s1        /* delta */
     /* delta must be >= 8 (these 8 ADDIs + the two CSRR instructions) */

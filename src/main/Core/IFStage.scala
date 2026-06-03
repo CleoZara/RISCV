@@ -41,6 +41,7 @@ class IFStage extends Module {
   pcGen.io.bpuPredTaken    := io.bpuPredTaken
   pcGen.io.bpuPredTarget   := io.bpuPredTarget
   pcGen.io.stallIf         := io.stallIf
+  pcGen.io.fetchSlot1Valid := icache.io.instValids(1)
 
   io.bpuQueryPc := pcGen.io.pcFetch
   io.debugPc := pcGen.io.currPc
@@ -59,7 +60,8 @@ class IFStage extends Module {
   icache.io.pfReqAddr  := prefetcher.io.pfReqAddr
   prefetcher.io.pfReqReady := icache.io.pfReqReady
 
-  val seqNextPc = pcGen.io.pcFetch + (issueWidth * 4).U
+  val seqStep = Mux(icache.io.instValids(1), (issueWidth * 4).U(32.W), 4.U(32.W))
+  val seqNextPc = pcGen.io.pcFetch + seqStep
   for (i <- 0 until issueWidth) {
     val slotPc = pcGen.io.pcFetch + (i * 4).U
     val slotPredNextPc = Mux(io.bpuPredTaken, io.bpuPredTarget, slotPc + 4.U)

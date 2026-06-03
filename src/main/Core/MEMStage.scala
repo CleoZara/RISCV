@@ -67,8 +67,27 @@ class MEMStage extends Module {
   dcache.io.mtimeHi := io.mtimeHi
   io.dmem <> dcache.io.mem
 
-  val printValidReg = RegNext(isPrintfWrite, false.B)
-  val printBitsReg  = RegEnable(io.in(memIdx).rs2Data(7, 0), 0.U(8.W), isPrintfWrite)
+  val printPc   = io.in(memIdx).pc
+  val printBits = io.in(memIdx).rs2Data(7, 0)
+
+  val lastPrintValid = RegInit(false.B)
+  val lastPrintPc    = RegInit(0.U(32.W))
+  val lastPrintBits  = RegInit(0.U(8.W))
+  val samePrintAsLast = lastPrintValid &&
+                        (lastPrintPc === printPc) &&
+                        (lastPrintBits === printBits)
+  val printFire = isPrintfWrite && !samePrintAsLast
+
+  when(isPrintfWrite) {
+    lastPrintValid := true.B
+    lastPrintPc    := printPc
+    lastPrintBits  := printBits
+  }.otherwise {
+    lastPrintValid := false.B
+  }
+
+  val printValidReg = RegNext(printFire, false.B)
+  val printBitsReg  = RegEnable(printBits, 0.U(8.W), printFire)
 
   io.dcacheStall := dcache.io.stall || dcache.io.missOut
   io.printChar.valid := printValidReg

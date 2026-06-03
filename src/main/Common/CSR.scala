@@ -75,8 +75,6 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
     ))
   }
 
-  io.rdata := csrRead(io.raddr)
-
   val oldVal = csrRead(io.waddr)
   io.oldData := oldVal
 
@@ -86,6 +84,12 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
     is(CSROp.SET)   { writeVal := oldVal | io.wdata }
     is(CSROp.CLEAR) { writeVal := oldVal & (~io.wdata).asUInt }
   }
+
+  val csrWriteForward =
+    io.opValid &&
+    (io.waddr === io.raddr) &&
+    (io.waddr =/= CSRAddr.misa)
+  io.rdata := Mux(csrWriteForward, writeVal, csrRead(io.raddr))
 
   when(io.opValid) {
     switch(io.waddr) {
