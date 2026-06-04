@@ -32,7 +32,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
     val isIdle = Output(Bool())
   })
 
-  val sIdle :: sRefillReq :: sRefillResp :: sDone :: sPrefill :: sPrefillResp :: sPrefillDone :: Nil = Enum(7)
+  val sIdle :: sRefillReq :: sRefillResp :: sRefillWrite :: sDone :: sPrefill :: sPrefillResp :: sPrefillWrite :: sPrefillDone :: Nil = Enum(9)
 
   val state = RegInit(sIdle)
   val nextState = WireDefault(state)
@@ -40,6 +40,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
   val wIdx = Reg(UInt(p.INDEX_W.W))
   val wWay = Reg(UInt(p.WAY_W.W))
   val wordCnt = RegInit(0.U(p.WORD_CNT_W.W))
+  val lineBuf = Reg(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
   val lastWord = wordCnt === (p.LINE_WORDS - 1).U
 
   switch(state) {
@@ -51,12 +52,14 @@ class ICacheMissFSM(p: CacheParams) extends Module {
       }
     }
     is(sRefillReq)  { when(io.mem.req.fire)  { nextState := sRefillResp } }
-    is(sRefillResp) { when(io.mem.resp.fire) { nextState := Mux(lastWord, sDone, sRefillReq) } }
+    is(sRefillResp) { when(io.mem.resp.fire) { nextState := sRefillWrite } }
+    is(sRefillWrite) { when(lastWord) { nextState := sDone } }
     is(sDone)       { nextState := sIdle }
     is(sPrefill)    { when(io.mem.req.fire)  { nextState := sPrefillResp } }
     is(sPrefillResp) {
-      when(io.mem.resp.fire) { nextState := Mux(lastWord, sPrefillDone, sPrefill) }
+      when(io.mem.resp.fire) { nextState := sPrefillWrite }
     }
+    is(sPrefillWrite) { when(lastWord) { nextState := sPrefillDone } }
     is(sPrefillDone) { nextState := sIdle }
   }
   state := nextState
@@ -72,30 +75,34 @@ class ICacheMissFSM(p: CacheParams) extends Module {
     wWay := io.pfEvictWay
     wordCnt := 0.U
   }.elsewhen((state === sRefillResp || state === sPrefillResp) && io.mem.resp.fire) {
+    lineBuf := io.mem.resp.bits.rline
+    wordCnt := 0.U
+  }.elsewhen(state === sRefillWrite || state === sPrefillWrite) {
     wordCnt := Mux(lastWord, 0.U, wordCnt + 1.U)
   }
 
-  val byteOffW = p.OFFSET_W - p.WORD_CNT_W
-  val fetchAddr = Cat(wTag, wIdx, wordCnt, 0.U(byteOffW.W))
+  val fetchAddr = Cat(wTag, wIdx, 0.U(p.OFFSET_W.W))
   val isRequesting = state === sRefillReq || state === sPrefill
   val isWaiting = state === sRefillResp || state === sPrefillResp
 
   io.mem.req.valid := isRequesting
   io.mem.req.bits.addr := fetchAddr
   io.mem.req.bits.wdata := 0.U
+  io.mem.req.bits.wline := 0.U.asTypeOf(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
   io.mem.req.bits.wen := false.B
   io.mem.req.bits.wmask := 0.U
+  io.mem.req.bits.line := true.B
   io.mem.resp.ready := isWaiting
 
-  io.refillEn := isWaiting && io.mem.resp.fire
+  io.refillEn := state === sRefillWrite || state === sPrefillWrite
   io.refillWay := wWay
   io.refillIdx := wIdx
   io.refillWord := wordCnt
-  io.refillData := io.mem.resp.bits.rdata
+  io.refillData := lineBuf(wordCnt)
   io.refillTag := wTag
   io.refillDone := state === sDone
   io.prefillDone := state === sPrefillDone
-  io.stall := state === sRefillReq || state === sRefillResp || state === sDone
+  io.stall := state === sRefillReq || state === sRefillResp || state === sRefillWrite || state === sDone
   io.isIdle := state === sIdle
   io.pfReqReady := state === sIdle && !io.missValid
 }

@@ -6,12 +6,15 @@ import chisel3.util._
 class MemBusReq(p: CacheParams) extends Bundle {
   val addr  = UInt(p.ADDR_WIDTH.W)
   val wdata = UInt(p.DATA_WIDTH.W)
+  val wline = Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W))
   val wen   = Bool()
   val wmask = UInt(p.WMASK_BITS.W)
+  val line  = Bool()
 }
 
 class MemBusResp(p: CacheParams) extends Bundle {
   val rdata = UInt(p.DATA_WIDTH.W)
+  val rline = Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W))
 }
 
 class MemBusIO(p: CacheParams) extends Bundle {

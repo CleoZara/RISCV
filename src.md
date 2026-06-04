@@ -2,7 +2,7 @@
 
 ## src\main\Common\CSR.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -123,11 +123,11 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
   io.mtimeHi    := mtime(63, 32)
   io.prefetchCtrl := prefetchCtrl
 }
-```
+````
 
 ## src\main\Common\Defines_c.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -374,11 +374,11 @@ class CorePerfCounters extends Bundle {
   val rasPushes         = UInt(64.W)
   val rasPops           = UInt(64.W)
 }
-```
+````
 
 ## src\main\Compat\ICacheMissFSMCompat.scala
 
-```scala
+``scala
 package icache
 
 import chisel3._
@@ -413,7 +413,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
     val isIdle = Output(Bool())
   })
 
-  val sIdle :: sRefillReq :: sRefillResp :: sDone :: sPrefill :: sPrefillResp :: sPrefillDone :: Nil = Enum(7)
+  val sIdle :: sRefillReq :: sRefillResp :: sRefillWrite :: sDone :: sPrefill :: sPrefillResp :: sPrefillWrite :: sPrefillDone :: Nil = Enum(9)
 
   val state = RegInit(sIdle)
   val nextState = WireDefault(state)
@@ -421,6 +421,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
   val wIdx = Reg(UInt(p.INDEX_W.W))
   val wWay = Reg(UInt(p.WAY_W.W))
   val wordCnt = RegInit(0.U(p.WORD_CNT_W.W))
+  val lineBuf = Reg(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
   val lastWord = wordCnt === (p.LINE_WORDS - 1).U
 
   switch(state) {
@@ -432,12 +433,14 @@ class ICacheMissFSM(p: CacheParams) extends Module {
       }
     }
     is(sRefillReq)  { when(io.mem.req.fire)  { nextState := sRefillResp } }
-    is(sRefillResp) { when(io.mem.resp.fire) { nextState := Mux(lastWord, sDone, sRefillReq) } }
+    is(sRefillResp) { when(io.mem.resp.fire) { nextState := sRefillWrite } }
+    is(sRefillWrite) { when(lastWord) { nextState := sDone } }
     is(sDone)       { nextState := sIdle }
     is(sPrefill)    { when(io.mem.req.fire)  { nextState := sPrefillResp } }
     is(sPrefillResp) {
-      when(io.mem.resp.fire) { nextState := Mux(lastWord, sPrefillDone, sPrefill) }
+      when(io.mem.resp.fire) { nextState := sPrefillWrite }
     }
+    is(sPrefillWrite) { when(lastWord) { nextState := sPrefillDone } }
     is(sPrefillDone) { nextState := sIdle }
   }
   state := nextState
@@ -453,38 +456,42 @@ class ICacheMissFSM(p: CacheParams) extends Module {
     wWay := io.pfEvictWay
     wordCnt := 0.U
   }.elsewhen((state === sRefillResp || state === sPrefillResp) && io.mem.resp.fire) {
+    lineBuf := io.mem.resp.bits.rline
+    wordCnt := 0.U
+  }.elsewhen(state === sRefillWrite || state === sPrefillWrite) {
     wordCnt := Mux(lastWord, 0.U, wordCnt + 1.U)
   }
 
-  val byteOffW = p.OFFSET_W - p.WORD_CNT_W
-  val fetchAddr = Cat(wTag, wIdx, wordCnt, 0.U(byteOffW.W))
+  val fetchAddr = Cat(wTag, wIdx, 0.U(p.OFFSET_W.W))
   val isRequesting = state === sRefillReq || state === sPrefill
   val isWaiting = state === sRefillResp || state === sPrefillResp
 
   io.mem.req.valid := isRequesting
   io.mem.req.bits.addr := fetchAddr
   io.mem.req.bits.wdata := 0.U
+  io.mem.req.bits.wline := 0.U.asTypeOf(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
   io.mem.req.bits.wen := false.B
   io.mem.req.bits.wmask := 0.U
+  io.mem.req.bits.line := true.B
   io.mem.resp.ready := isWaiting
 
-  io.refillEn := isWaiting && io.mem.resp.fire
+  io.refillEn := state === sRefillWrite || state === sPrefillWrite
   io.refillWay := wWay
   io.refillIdx := wIdx
   io.refillWord := wordCnt
-  io.refillData := io.mem.resp.bits.rdata
+  io.refillData := lineBuf(wordCnt)
   io.refillTag := wTag
   io.refillDone := state === sDone
   io.prefillDone := state === sPrefillDone
-  io.stall := state === sRefillReq || state === sRefillResp || state === sDone
+  io.stall := state === sRefillReq || state === sRefillResp || state === sRefillWrite || state === sDone
   io.isIdle := state === sIdle
   io.pfReqReady := state === sIdle && !io.missValid
 }
-```
+````
 
 ## src\main\Core\BypassHazardUnit.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -893,11 +900,11 @@ class BypassHazardUnit(
     io.wawStall := false.B
   }
 }
-```
+````
 
 ## src\main\Core\EXStage.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -1061,11 +1068,11 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
   io.bpuUpdateTarget := Mux(bpuFromSlot0, updateTarget0, updateTarget1)
 
 }
-```
+````
 
 ## src\main\Core\IDStage.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -1282,11 +1289,11 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
     io.hazardCanBypassToYounger(i) := (i == 0).B && slot0CanBypass
   }
 }
-```
+````
 
 ## src\main\Core\IFStage.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -1401,11 +1408,11 @@ class IFStage extends Module {
 
   io.icacheStall := icache.io.missOut
 }
-```
+````
 
 ## src\main\Core\InOrderCore.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -1632,11 +1639,11 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
     memwbReg := memStage.io.out
   }
 }
-```
+````
 
 ## src\main\Core\MEMStage.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -1749,11 +1756,11 @@ class MEMStage extends Module {
     io.out(i).ctrl.allowIn := true.B
   }
 }
-```
+````
 
 ## src\main\Core\RegFile.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -1794,11 +1801,11 @@ class RegFile(issueWidth: Int = 2) extends Module {
     regs(io.waddr(1)) := io.wdata(1)
   }
 }
-```
+````
 
 ## src\main\Core\WBStage.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -1842,11 +1849,11 @@ class WBStage extends Module {
     io.wbData(i) := data
   }
 }
-```
+````
 
 ## src\main\Dcache\CacheParams.scala
 
-```scala
+``scala
 package parameterized_cache
 
 import chisel3._
@@ -1881,11 +1888,11 @@ class TagEntry(p: CacheParams) extends Bundle {
   val dirty = Bool()
   val tag   = UInt(p.TAG_W.W)
 }
-```
+````
 
 ## src\main\Dcache\DataArray.scala
 
-```scala
+``scala
 package parameterized_cache
 
 import chisel3._
@@ -1930,11 +1937,11 @@ class DataArray(p: CacheParams) extends Module {
     dArray(io.hitWay)(io.idx)(io.wordsoff) := (io.wdata & byteMask) | (oldData & ~byteMask)
   }
 }
-```
+````
 
 ## src\main\Dcache\DCacheMissFSM.scala
 
-```scala
+``scala
 package parameterized_cache
 
 import chisel3._
@@ -1968,7 +1975,7 @@ class DCacheMissFSMIO(p: CacheParams) extends Bundle {
 class DCacheMissFSM(p: CacheParams) extends Module {
   val io = IO(new DCacheMissFSMIO(p))
 
-  val sIdle :: sCheck :: sWbReq :: sWbResp :: sRefillReq :: sRefillResp :: sDone :: Nil = Enum(7)
+  val sIdle :: sCheck :: sWbReq :: sWbResp :: sRefillReq :: sRefillResp :: sRefillWrite :: sDone :: Nil = Enum(8)
   val state = RegInit(sIdle)
   val nextState = WireDefault(state)
 
@@ -1987,9 +1994,10 @@ class DCacheMissFSM(p: CacheParams) extends Module {
     is(sIdle)       { when(io.missValid) { nextState := sCheck } }
     is(sCheck)      { nextState := Mux(dirty, sWbReq, sRefillReq) }
     is(sWbReq)      { when(io.mem.req.fire) { nextState := sWbResp } }
-    is(sWbResp)     { when(io.mem.resp.fire) { nextState := Mux(lastWord, sRefillReq, sWbReq) } }
+    is(sWbResp)     { when(io.mem.resp.fire) { nextState := sRefillReq } }
     is(sRefillReq)  { when(io.mem.req.fire) { nextState := sRefillResp } }
-    is(sRefillResp) { when(io.mem.resp.fire) { nextState := Mux(lastWord, sDone, sRefillReq) } }
+    is(sRefillResp) { when(io.mem.resp.fire) { nextState := sRefillWrite } }
+    is(sRefillWrite) { when(lastWord) { nextState := sDone } }
     is(sDone)       { nextState := sIdle }
   }
   state := nextState
@@ -2003,37 +2011,42 @@ class DCacheMissFSM(p: CacheParams) extends Module {
     isStore  := io.missIsStore
     wordCnt  := 0.U
     lineBuf  := io.evictLine
-  }.elsewhen((state === sWbResp || state === sRefillResp) && io.mem.resp.fire) {
+  }.elsewhen(state === sRefillResp && io.mem.resp.fire) {
+    lineBuf := io.mem.resp.bits.rline
+    wordCnt := 0.U
+  }.elsewhen(state === sRefillWrite) {
     wordCnt := Mux(lastWord, 0.U, wordCnt + 1.U)
   }
 
-  val wbAddr     = Cat(evictTag, idx, wordCnt, 0.U((p.OFFSET_W - p.WORD_CNT_W).W))
-  val refillAddr = Cat(missTag, idx, wordCnt, 0.U((p.OFFSET_W - p.WORD_CNT_W).W))
+  val wbAddr     = Cat(evictTag, idx, 0.U(p.OFFSET_W.W))
+  val refillAddr = Cat(missTag, idx, 0.U(p.OFFSET_W.W))
 
   val isWb       = state === sWbReq
   val isRefill   = state === sRefillReq
   io.mem.req.valid      := isWb || isRefill
   io.mem.req.bits.addr  := Mux(isWb, wbAddr, refillAddr)
-  io.mem.req.bits.wdata := Mux(isWb, lineBuf(wordCnt), 0.U)
+  io.mem.req.bits.wdata := 0.U
+  io.mem.req.bits.wline := lineBuf
   io.mem.req.bits.wen   := isWb
-  io.mem.req.bits.wmask := Mux(isWb, ~0.U(p.WMASK_BITS.W), 0.U)
+  io.mem.req.bits.wmask := 0.U
+  io.mem.req.bits.line  := true.B
   io.mem.resp.ready     := state === sWbResp || state === sRefillResp
 
-  io.refillEn     := state === sRefillResp && io.mem.resp.fire
+  io.refillEn     := state === sRefillWrite
   io.refillWay    := way
   io.refillIdx    := idx
   io.refillWord   := wordCnt
-  io.refillData   := io.mem.resp.bits.rdata
+  io.refillData   := lineBuf(wordCnt)
   io.refillTag    := missTag
   io.refillDone   := state === sDone
   io.refillIsStore := isStore
   io.stall        := state =/= sIdle
 }
-```
+````
 
 ## src\main\Dcache\DCacheTop.scala
 
-```scala
+``scala
 package parameterized_cache
 
 import chisel3._
@@ -2179,11 +2192,11 @@ class DCacheTop(p: CacheParams) extends Module {
   io.missOut := topStall
   io.stall   := topStall
 }
-```
+````
 
 ## src\main\Dcache\HitTest.scala
 
-```scala
+``scala
 package parameterized_cache
 
 import chisel3._
@@ -2208,11 +2221,11 @@ class HitTest(p: CacheParams) extends Module {
   io.hitWay    := PriorityEncoder(hitVec)
   io.missValid := !io.isHit && (io.memRen || io.wen)
 }
-```
+````
 
 ## src\main\Dcache\LoadExtend.scala
 
-```scala
+``scala
 package parameterized_cache
 
 import chisel3._
@@ -2241,11 +2254,11 @@ class LoadExtend(p: CacheParams) extends Module {
     2.U -> (extByte ## byte)
   ))
 }
-```
+````
 
 ## src\main\Dcache\MemBusIO.scala
 
-```scala
+``scala
 package parameterized_cache
 
 import chisel3._
@@ -2254,23 +2267,26 @@ import chisel3.util._
 class MemBusReq(p: CacheParams) extends Bundle {
   val addr  = UInt(p.ADDR_WIDTH.W)
   val wdata = UInt(p.DATA_WIDTH.W)
+  val wline = Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W))
   val wen   = Bool()
   val wmask = UInt(p.WMASK_BITS.W)
+  val line  = Bool()
 }
 
 class MemBusResp(p: CacheParams) extends Bundle {
   val rdata = UInt(p.DATA_WIDTH.W)
+  val rline = Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W))
 }
 
 class MemBusIO(p: CacheParams) extends Bundle {
   val req  = Decoupled(new MemBusReq(p))
   val resp = Flipped(Decoupled(new MemBusResp(p)))
 }
-```
+````
 
 ## src\main\Dcache\TagArray.scala
 
-```scala
+``scala
 package parameterized_cache
 
 import chisel3._
@@ -2313,11 +2329,11 @@ class TagArray(p: CacheParams) extends Module {
     tagArray(io.idx)(io.setDirtyWay).dirty := true.B
   }
 }
-```
+````
 
 ## src\main\Dcache\TreePLRU.scala
 
-```scala
+``scala
 package parameterized_cache
 
 import chisel3._
@@ -2367,11 +2383,11 @@ class TreePLRU(p: CacheParams) extends Module {
     treeArray(io.idx) := newBits.asUInt
   }
 }
-```
+````
 
 ## src\main\Decode\Decoder_c.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -2523,11 +2539,11 @@ class Decoder(enableRV32M: Boolean = false) extends Module {
   io.out.ctrl.kill    := false.B
   io.out.ctrl.allowIn := true.B
 }
-```
+````
 
 ## src\main\Execute\ALU.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -2613,11 +2629,11 @@ class ParamALU(val xlen: Int = 32, val enableRV32M: Boolean = false) extends Mod
 
   io.result := MuxLookup(io.aluOp, 0.U(xlen.W), baseAluMapping ++ rv32mMapping)
 }
-```
+````
 
 ## src\main\frame.md
 
-```scala
+``md
 # 娴佹按绾挎鏋惰鏄?
 ## IF 妯″潡
 
@@ -3174,11 +3190,11 @@ EX 绾у簲鎶?`rs1Data` 浣滀负 `wdata`锛孋SRFile 杈撳嚭 `oldData`锛岄
 ### CSR 鍙屽彂闄愬埗
 
 鐢变簬褰撳墠 CSRFile 鍙湁涓€涓绔彛鍜屼竴涓啓璇锋眰绔彛锛屽熀纭€椤哄簭鏍稿簲鍦?ID 绾ч檺鍒跺悓鍛ㄦ湡鏈€澶氫竴鏉?CSR 鎸囦护杩涘叆 EX銆傝嫢妲?0 鍜屾Ы 1 閮芥槸 CSR 鎸囦护锛屽簲鍙彂灏勬Ы 0锛屾Ы 1 涓嬩竴鍛ㄦ湡閲嶆柊灏濊瘯銆?
-```
+````
 
 ## src\main\Frontend\BPU.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -3275,11 +3291,11 @@ class BPU extends Module {
     }
   }
 }
-```
+````
 
 ## src\main\Frontend\BPU_RAS.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -3408,11 +3424,11 @@ class BPU_RAS extends Module {
     }
   }
 }
-```
+````
 
 ## src\main\Frontend\NextLinePrefetcher.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -3459,11 +3475,11 @@ class NextLinePrefetcher extends Module {
   io.pfReqAddr  := nextLineAddr
   // pfReqReady=0 鏃舵湰娆¤姹傝 ICacheMissFSM 闈欓粯涓㈠純锛坧fReqReady
   // 浠呭湪 FSM sIdle 涓旀棤 miss 鏃剁疆楂橈級锛涢鍙栧櫒鏈韩涓嶉渶瑕侀噸璇曢€昏緫銆?}
-```
+````
 
 ## src\main\Frontend\PcGen.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -3534,11 +3550,11 @@ class PcGen(
   io.currPc  := pcReg
   io.pcFetch := pcReg
 }
-```
+````
 
 ## src\main\Frontend\TAGE.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -3852,11 +3868,11 @@ class TAGE extends Module {
     rasPtr := (rasPtr - 1.U)(3, 0)
   }
 }
-```
+````
 
 ## src\main\Icache\ICacheMissFSM.scala
 
-```scala
+``scala
 package icache
 
 import chisel3._
@@ -3917,8 +3933,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
   })
 
   // 鈹€鈹€ 鐘舵€佸畾涔?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-  val sIdle :: sRefillReq :: sRefillResp :: sDone ::
-      sPrefill :: sPrefillResp :: sPrefillDone :: Nil = Enum(7)
+  val sIdle :: sRefillReq :: sRefillResp :: sRefillWrite :: sDone :: sPrefill :: sPrefillResp :: sPrefillWrite :: sPrefillDone :: Nil = Enum(9)
 
   val state     = RegInit(sIdle)
   val nextState = WireDefault(state)
@@ -3928,6 +3943,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
   val wIdx    = Reg(UInt(p.INDEX_W.W))
   val wWay    = Reg(UInt(p.WAY_W.W))
   val wordCnt = Reg(UInt(p.WORD_CNT_W.W))
+  val lineBuf = Reg(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
 
   val lastWord = wordCnt === (p.LINE_WORDS - 1).U
 
@@ -3944,9 +3960,10 @@ class ICacheMissFSM(p: CacheParams) extends Module {
       when(io.mem.req.fire) { nextState := sRefillResp }
     }
     is(sRefillResp) {
-      when(io.mem.resp.fire) {
-        nextState := Mux(lastWord, sDone, sRefillReq)
-      }
+      when(io.mem.resp.fire) { nextState := sRefillWrite }
+    }
+    is(sRefillWrite) {
+      when(lastWord) { nextState := sDone }
     }
     is(sDone) { nextState := sIdle }
 
@@ -3954,9 +3971,10 @@ class ICacheMissFSM(p: CacheParams) extends Module {
       when(io.mem.req.fire) { nextState := sPrefillResp }
     }
     is(sPrefillResp) {
-      when(io.mem.resp.fire) {
-        nextState := Mux(lastWord, sPrefillDone, sPrefill)
-      }
+      when(io.mem.resp.fire) { nextState := sPrefillWrite }
+    }
+    is(sPrefillWrite) {
+      when(lastWord) { nextState := sPrefillDone }
     }
     is(sPrefillDone) { nextState := sIdle }
   }
@@ -3974,13 +3992,15 @@ class ICacheMissFSM(p: CacheParams) extends Module {
     wWay    := io.pfEvictWay
     wordCnt := 0.U
   }.elsewhen((state === sRefillResp || state === sPrefillResp) && io.mem.resp.fire) {
+    lineBuf := io.mem.resp.bits.rline
+    wordCnt := 0.U
+  }.elsewhen(state === sRefillWrite || state === sPrefillWrite) {
     wordCnt := Mux(lastWord, 0.U, wordCnt + 1.U)
   }
 
   // 鈹€鈹€ 鍐呭瓨鎬荤嚎鍦板潃锛歿tag, idx, wordCnt, 2'b00} 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   // byteOffW = OFFSET_W - WORD_CNT_W = 6 - 4 = 2锛?2 浣嶅瓧鍐呭瓧鑺傚亸绉诲搴︼級
-  private val byteOffW  = p.OFFSET_W - p.WORD_CNT_W
-  val fetchAddr = Cat(wTag, wIdx, wordCnt, 0.U(byteOffW.W))
+  val fetchAddr = Cat(wTag, wIdx, 0.U(p.OFFSET_W.W))
 
   val isRequesting = state === sRefillReq  || state === sPrefill
   val isWaiting    = state === sRefillResp || state === sPrefillResp
@@ -3988,31 +4008,33 @@ class ICacheMissFSM(p: CacheParams) extends Module {
   io.mem.req.valid      := isRequesting
   io.mem.req.bits.addr  := fetchAddr
   io.mem.req.bits.wdata := 0.U
+  io.mem.req.bits.wline := 0.U.asTypeOf(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
   io.mem.req.bits.wen   := false.B
   io.mem.req.bits.wmask := 0.U
+  io.mem.req.bits.line  := true.B
   io.mem.resp.ready     := isWaiting
 
   // 鈹€鈹€ 鍥炲～杈撳嚭 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-  io.refillEn    := isWaiting && io.mem.resp.fire
+  io.refillEn    := state === sRefillWrite || state === sPrefillWrite
   io.refillWay   := wWay
   io.refillIdx   := wIdx
   io.refillWord  := wordCnt
-  io.refillData  := io.mem.resp.bits.rdata
+  io.refillData  := lineBuf(wordCnt)
   io.refillTag   := wTag
   io.refillDone  := state === sDone
   io.prefillDone := state === sPrefillDone
 
   // 鈹€鈹€ 鐘舵€佽緭鍑?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-  // stall 浠呭湪澶勭悊鐪熸 miss 鐨勪笁涓姸鎬佸唴缃珮锛涢鍙栦笉褰卞搷娴佹按绾?  io.stall  := state === sRefillReq || state === sRefillResp || state === sDone
+  // stall 浠呭湪澶勭悊鐪熸 miss 鐨勪笁涓姸鎬佸唴缃珮锛涢鍙栦笉褰卞搷娴佹按绾?  io.stall  := state === sRefillReq || state === sRefillResp || state === sRefillWrite || state === sDone
   io.isIdle := state === sIdle
 
   // 棰勫彇鎻℃墜锛氫粎鍦?sIdle 涓旀棤 miss 鏃舵帴鍙?  io.pfReqReady := (state === sIdle) && !io.missValid
 }
-```
+````
 
 ## src\main\Icache\ICacheParams.scala
 
-```scala
+``scala
 package icache
 
 import chisel3._
@@ -4026,11 +4048,11 @@ class ITagEntry(p: CacheParams) extends Bundle {
   val valid = Bool()
   val tag   = UInt(p.TAG_W.W)
 }
-```
+````
 
 ## src\main\Icache\ICacheTop.scala
 
-```scala
+``scala
 package icache
 
 import chisel3._
@@ -4203,11 +4225,11 @@ object ICacheTop {
     LINE_BYTES = 64
   )
 }
-```
+````
 
 ## src\main\Icache\IDataArray.scala
 
-```scala
+``scala
 package icache
 
 import chisel3._
@@ -4248,11 +4270,11 @@ class IDataArray(p: CacheParams) extends Module {
     dArray(io.refillWay)(io.refillIdx)(io.refillWord) := io.refillData
   }
 }
-```
+````
 
 ## src\main\Icache\IHitTest.scala
 
-```scala
+``scala
 package icache
 
 import chisel3._
@@ -4285,11 +4307,11 @@ class IHitTest(p: CacheParams) extends Module {
   io.hitWay    := PriorityEncoder(hitVec)
   io.missValid := !io.isHit && io.reqValid
 }
-```
+````
 
 ## src\main\Icache\InstSelect.scala
 
-```scala
+``scala
 package icache
 
 import chisel3._
@@ -4320,11 +4342,11 @@ class InstSelect(p: CacheParams) extends Module {
   // 琛屽熬鍒ゆ柇锛歸ordsoff 涓烘渶鍚庝竴涓瓧鏃?slot1 瓒婄晫
   io.slot1Valid := io.wordsoff =/= (p.LINE_WORDS - 1).U
 }
-```
+````
 
 ## src\main\Icache\ITagArray.scala
 
-```scala
+``scala
 package icache
 
 import chisel3._
@@ -4369,11 +4391,11 @@ class ITagArray(p: CacheParams) extends Module {
     tArray(io.refillIdx)(io.refillWay).tag   := io.refillTag
   }
 }
-```
+````
 
 ## src\main\Memory\mem.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -4407,6 +4429,7 @@ class RV32DualPortMemory(
   val sourceIsD = RegInit(false.B)
   val count = RegInit(0.U(log2Ceil(latency + 1).W))
   val rdata = RegInit(0.U(32.W))
+  val rline = Reg(Vec(p.LINE_WORDS, UInt(32.W)))
 
   io.dmem.req.ready := !busy
   io.imem.req.ready := !busy && !io.dmem.req.valid
@@ -4415,23 +4438,36 @@ class RV32DualPortMemory(
   io.imem.resp.valid := busy && !sourceIsD && count === 0.U
   io.dmem.resp.bits.rdata := rdata
   io.imem.resp.bits.rdata := rdata
+  io.dmem.resp.bits.rline := rline
+  io.imem.resp.bits.rline := rline
 
   val acceptD = io.dmem.req.fire
   val acceptI = io.imem.req.fire
   val accept = acceptD || acceptI
   val req = Mux(acceptD, io.dmem.req.bits, io.imem.req.bits)
   val wordAddr = req.addr(log2Ceil(words) + 1, 2)
+  val fullCount = latency.U(count.getWidth.W)
+  val lineBaseWordAddr = Cat(req.addr(log2Ceil(words) + 1, p.OFFSET_W), 0.U(p.WORD_CNT_W.W))
 
   when(accept) {
     busy := true.B
     sourceIsD := acceptD
-    count := latency.U
+    count := fullCount
     rdata := mem(wordAddr)
+    for (i <- 0 until p.LINE_WORDS) {
+      rline(i) := mem(lineBaseWordAddr + i.U)
+    }
 
     when(req.wen) {
-      val old = mem(wordAddr)
-      val byteMask = Cat((0 until 4).reverse.map(i => Fill(8, req.wmask(i))))
-      mem(wordAddr) := (req.wdata & byteMask) | (old & ~byteMask)
+      when(req.line) {
+        for (i <- 0 until p.LINE_WORDS) {
+          mem(lineBaseWordAddr + i.U) := req.wline(i)
+        }
+      }.otherwise {
+        val old = mem(wordAddr)
+        val byteMask = Cat((0 until 4).reverse.map(i => Fill(8, req.wmask(i))))
+        mem(wordAddr) := (req.wdata & byteMask) | (old & ~byteMask)
+      }
     }
   }.elsewhen(busy && count =/= 0.U) {
     count := count - 1.U
@@ -4439,11 +4475,11 @@ class RV32DualPortMemory(
     busy := false.B
   }
 }
-```
+````
 
 ## src\main\Top.scala
 
-```scala
+``scala
 package riscv
 
 import chisel3._
@@ -4477,5 +4513,5 @@ class Top(enableRV32M: Boolean = false) extends Module {
 object Elaborate extends App {
   (new chisel3.stage.ChiselStage).emitVerilog(new Top)
 }
-```
+````
 

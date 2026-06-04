@@ -67,8 +67,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
   })
 
   // ── 状态定义 ─────────────────────────────────────────────────
-  val sIdle :: sRefillReq :: sRefillResp :: sDone ::
-      sPrefill :: sPrefillResp :: sPrefillDone :: Nil = Enum(7)
+  val sIdle :: sRefillReq :: sRefillResp :: sRefillWrite :: sDone :: sPrefill :: sPrefillResp :: sPrefillWrite :: sPrefillDone :: Nil = Enum(9)
 
   val state     = RegInit(sIdle)
   val nextState = WireDefault(state)
@@ -78,6 +77,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
   val wIdx    = Reg(UInt(p.INDEX_W.W))
   val wWay    = Reg(UInt(p.WAY_W.W))
   val wordCnt = Reg(UInt(p.WORD_CNT_W.W))
+  val lineBuf = Reg(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
 
   val lastWord = wordCnt === (p.LINE_WORDS - 1).U
 
@@ -94,9 +94,10 @@ class ICacheMissFSM(p: CacheParams) extends Module {
       when(io.mem.req.fire) { nextState := sRefillResp }
     }
     is(sRefillResp) {
-      when(io.mem.resp.fire) {
-        nextState := Mux(lastWord, sDone, sRefillReq)
-      }
+      when(io.mem.resp.fire) { nextState := sRefillWrite }
+    }
+    is(sRefillWrite) {
+      when(lastWord) { nextState := sDone }
     }
     is(sDone) { nextState := sIdle }
 
@@ -104,9 +105,10 @@ class ICacheMissFSM(p: CacheParams) extends Module {
       when(io.mem.req.fire) { nextState := sPrefillResp }
     }
     is(sPrefillResp) {
-      when(io.mem.resp.fire) {
-        nextState := Mux(lastWord, sPrefillDone, sPrefill)
-      }
+      when(io.mem.resp.fire) { nextState := sPrefillWrite }
+    }
+    is(sPrefillWrite) {
+      when(lastWord) { nextState := sPrefillDone }
     }
     is(sPrefillDone) { nextState := sIdle }
   }
@@ -124,13 +126,15 @@ class ICacheMissFSM(p: CacheParams) extends Module {
     wWay    := io.pfEvictWay
     wordCnt := 0.U
   }.elsewhen((state === sRefillResp || state === sPrefillResp) && io.mem.resp.fire) {
+    lineBuf := io.mem.resp.bits.rline
+    wordCnt := 0.U
+  }.elsewhen(state === sRefillWrite || state === sPrefillWrite) {
     wordCnt := Mux(lastWord, 0.U, wordCnt + 1.U)
   }
 
   // ── 内存总线地址：{tag, idx, wordCnt, 2'b00} ──────────────────
   // byteOffW = OFFSET_W - WORD_CNT_W = 6 - 4 = 2（32 位字内字节偏移宽度）
-  private val byteOffW  = p.OFFSET_W - p.WORD_CNT_W
-  val fetchAddr = Cat(wTag, wIdx, wordCnt, 0.U(byteOffW.W))
+  val fetchAddr = Cat(wTag, wIdx, 0.U(p.OFFSET_W.W))
 
   val isRequesting = state === sRefillReq  || state === sPrefill
   val isWaiting    = state === sRefillResp || state === sPrefillResp
@@ -138,23 +142,25 @@ class ICacheMissFSM(p: CacheParams) extends Module {
   io.mem.req.valid      := isRequesting
   io.mem.req.bits.addr  := fetchAddr
   io.mem.req.bits.wdata := 0.U
+  io.mem.req.bits.wline := 0.U.asTypeOf(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
   io.mem.req.bits.wen   := false.B
   io.mem.req.bits.wmask := 0.U
+  io.mem.req.bits.line  := true.B
   io.mem.resp.ready     := isWaiting
 
   // ── 回填输出 ──────────────────────────────────────────────────
-  io.refillEn    := isWaiting && io.mem.resp.fire
+  io.refillEn    := state === sRefillWrite || state === sPrefillWrite
   io.refillWay   := wWay
   io.refillIdx   := wIdx
   io.refillWord  := wordCnt
-  io.refillData  := io.mem.resp.bits.rdata
+  io.refillData  := lineBuf(wordCnt)
   io.refillTag   := wTag
   io.refillDone  := state === sDone
   io.prefillDone := state === sPrefillDone
 
   // ── 状态输出 ──────────────────────────────────────────────────
   // stall 仅在处理真正 miss 的三个状态内置高；预取不影响流水线
-  io.stall  := state === sRefillReq || state === sRefillResp || state === sDone
+  io.stall  := state === sRefillReq || state === sRefillResp || state === sRefillWrite || state === sDone
   io.isIdle := state === sIdle
 
   // 预取握手：仅在 sIdle 且无 miss 时接受

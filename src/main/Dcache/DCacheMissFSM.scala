@@ -31,7 +31,7 @@ class DCacheMissFSMIO(p: CacheParams) extends Bundle {
 class DCacheMissFSM(p: CacheParams) extends Module {
   val io = IO(new DCacheMissFSMIO(p))
 
-  val sIdle :: sCheck :: sWbReq :: sWbResp :: sRefillReq :: sRefillResp :: sDone :: Nil = Enum(7)
+  val sIdle :: sCheck :: sWbReq :: sWbResp :: sRefillReq :: sRefillResp :: sRefillWrite :: sDone :: Nil = Enum(8)
   val state = RegInit(sIdle)
   val nextState = WireDefault(state)
 
@@ -50,9 +50,10 @@ class DCacheMissFSM(p: CacheParams) extends Module {
     is(sIdle)       { when(io.missValid) { nextState := sCheck } }
     is(sCheck)      { nextState := Mux(dirty, sWbReq, sRefillReq) }
     is(sWbReq)      { when(io.mem.req.fire) { nextState := sWbResp } }
-    is(sWbResp)     { when(io.mem.resp.fire) { nextState := Mux(lastWord, sRefillReq, sWbReq) } }
+    is(sWbResp)     { when(io.mem.resp.fire) { nextState := sRefillReq } }
     is(sRefillReq)  { when(io.mem.req.fire) { nextState := sRefillResp } }
-    is(sRefillResp) { when(io.mem.resp.fire) { nextState := Mux(lastWord, sDone, sRefillReq) } }
+    is(sRefillResp) { when(io.mem.resp.fire) { nextState := sRefillWrite } }
+    is(sRefillWrite) { when(lastWord) { nextState := sDone } }
     is(sDone)       { nextState := sIdle }
   }
   state := nextState
@@ -66,27 +67,32 @@ class DCacheMissFSM(p: CacheParams) extends Module {
     isStore  := io.missIsStore
     wordCnt  := 0.U
     lineBuf  := io.evictLine
-  }.elsewhen((state === sWbResp || state === sRefillResp) && io.mem.resp.fire) {
+  }.elsewhen(state === sRefillResp && io.mem.resp.fire) {
+    lineBuf := io.mem.resp.bits.rline
+    wordCnt := 0.U
+  }.elsewhen(state === sRefillWrite) {
     wordCnt := Mux(lastWord, 0.U, wordCnt + 1.U)
   }
 
-  val wbAddr     = Cat(evictTag, idx, wordCnt, 0.U((p.OFFSET_W - p.WORD_CNT_W).W))
-  val refillAddr = Cat(missTag, idx, wordCnt, 0.U((p.OFFSET_W - p.WORD_CNT_W).W))
+  val wbAddr     = Cat(evictTag, idx, 0.U(p.OFFSET_W.W))
+  val refillAddr = Cat(missTag, idx, 0.U(p.OFFSET_W.W))
 
   val isWb       = state === sWbReq
   val isRefill   = state === sRefillReq
   io.mem.req.valid      := isWb || isRefill
   io.mem.req.bits.addr  := Mux(isWb, wbAddr, refillAddr)
-  io.mem.req.bits.wdata := Mux(isWb, lineBuf(wordCnt), 0.U)
+  io.mem.req.bits.wdata := 0.U
+  io.mem.req.bits.wline := lineBuf
   io.mem.req.bits.wen   := isWb
-  io.mem.req.bits.wmask := Mux(isWb, ~0.U(p.WMASK_BITS.W), 0.U)
+  io.mem.req.bits.wmask := 0.U
+  io.mem.req.bits.line  := true.B
   io.mem.resp.ready     := state === sWbResp || state === sRefillResp
 
-  io.refillEn     := state === sRefillResp && io.mem.resp.fire
+  io.refillEn     := state === sRefillWrite
   io.refillWay    := way
   io.refillIdx    := idx
   io.refillWord   := wordCnt
-  io.refillData   := io.mem.resp.bits.rdata
+  io.refillData   := lineBuf(wordCnt)
   io.refillTag    := missTag
   io.refillDone   := state === sDone
   io.refillIsStore := isStore
