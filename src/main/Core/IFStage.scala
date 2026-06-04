@@ -21,6 +21,8 @@ class IFStage extends Module {
     val bpuQueryPc    = Output(UInt(32.W))
     val bpuPredTaken  = Input(Bool())
     val bpuPredTarget = Input(UInt(32.W))
+    val rasPredValid  = Input(Bool())
+    val rasPredTarget = Input(UInt(32.W))
 
     val nextLinePrefetchEn = Input(Bool())
 
@@ -35,6 +37,7 @@ class IFStage extends Module {
   val prefetcher = Module(new NextLinePrefetcher)
 
   private def isJal(inst: UInt): Bool = inst(6, 0) === "b1101111".U
+  private def isRet(inst: UInt): Bool = inst === "h00008067".U
   private def jalImm(inst: UInt): UInt = {
     Cat(Fill(11, inst(31)), inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
   }
@@ -43,11 +46,15 @@ class IFStage extends Module {
   val slotPc1 = pcGen.io.pcFetch + 4.U
   val slot0Jal = icache.io.instValids(0) && isJal(icache.io.insts(0))
   val slot1Jal = icache.io.instValids(1) && isJal(icache.io.insts(1))
+  val slot0Ret = icache.io.instValids(0) && isRet(icache.io.insts(0)) && io.rasPredValid
+  val slot1Ret = icache.io.instValids(1) && isRet(icache.io.insts(1)) && io.rasPredValid
   val slot0JalTarget = slotPc0 + jalImm(icache.io.insts(0))
   val slot1JalTarget = slotPc1 + jalImm(icache.io.insts(1))
-  val ifPredTaken = slot0Jal || io.bpuPredTaken || slot1Jal
+  val ifPredTaken = slot0Jal || slot0Ret || io.bpuPredTaken || slot1Jal || slot1Ret
   val ifPredTarget = Mux(slot0Jal, slot0JalTarget,
-    Mux(io.bpuPredTaken, io.bpuPredTarget, slot1JalTarget))
+    Mux(slot0Ret, io.rasPredTarget,
+      Mux(io.bpuPredTaken, io.bpuPredTarget,
+        Mux(slot1Jal, slot1JalTarget, io.rasPredTarget))))
 
   pcGen.io.exRedirectValid := io.exRedirectValid
   pcGen.io.exRedirectPc    := io.exRedirectPc
@@ -80,17 +87,21 @@ class IFStage extends Module {
   for (i <- 0 until issueWidth) {
     val slotPc = pcGen.io.pcFetch + (i * 4).U
     val slotJal = if (i == 0) slot0Jal else slot1Jal
+    val slotRet = if (i == 0) slot0Ret else slot1Ret
     val slotJalTarget = if (i == 0) slot0JalTarget else slot1JalTarget
     val slotPredNextPc = Mux(slotJal, slotJalTarget,
+      Mux(slotRet, io.rasPredTarget,
       Mux(io.bpuPredTaken, io.bpuPredTarget, slotPc + 4.U))
+    )
 
     io.out(i) := 0.U.asTypeOf(new IFIDSlot)
     io.out(i).pc := slotPc
     io.out(i).inst := icache.io.insts(i)
     io.out(i).slotIdx := i.U
     io.out(i).fetchPc := pcGen.io.pcFetch
-    io.out(i).predTaken := slotJal || io.bpuPredTaken
-    io.out(i).predTarget := Mux(slotJal, slotJalTarget, io.bpuPredTarget)
+    io.out(i).predTaken := slotJal || slotRet || io.bpuPredTaken
+    io.out(i).predTarget := Mux(slotJal, slotJalTarget,
+      Mux(slotRet, io.rasPredTarget, io.bpuPredTarget))
     io.out(i).predNextPc := slotPredNextPc
     io.out(i).seqNextPc := seqNextPc
     io.out(i).icacheHit := icache.io.respValid

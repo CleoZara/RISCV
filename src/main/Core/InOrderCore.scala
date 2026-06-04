@@ -14,6 +14,7 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
     val printChar = Output(Valid(UInt(8.W)))
     val success   = Output(Bool())
     val debugPc   = Output(UInt(32.W))
+    val perf      = Output(new CorePerfCounters)
   })
 
   val ifStage  = Module(new IFStage)
@@ -23,7 +24,7 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   val wbStage  = Module(new WBStage)
   val regFile  = Module(new RegFile(issueWidth))
   val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M))
-  val bpu      = Module(new BPU)
+  val bpu      = Module(new BPU_RAS)
   val bypass   = Module(new PipelineBypassUnit(issueWidth))
   val hazard   = Module(new BypassHazardUnit(issueWidth))
 
@@ -46,6 +47,11 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   bpu.io.updatePc     := exStage.io.bpuUpdatePc
   bpu.io.updateTaken  := exStage.io.bpuUpdateTaken
   bpu.io.updateTarget := exStage.io.bpuUpdateTarget
+  bpu.io.ras.push       := idStage.io.rasPush
+  bpu.io.ras.pushAddr   := idStage.io.rasPushAddr
+  bpu.io.ras.pop        := idStage.io.rasPop
+  bpu.io.ras.flush      := false.B
+  bpu.io.ras.checkpoint := 0.U
 
   // ── IF Stage ──────────────────────────────────────────────────────────
   ifStage.io.exRedirectValid     := exStage.io.exRedirectValid
@@ -54,6 +60,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   ifStage.io.idRedirectPc        := idStage.io.idRedirectPc
   ifStage.io.flushIf             := hazard.io.flushIF
   ifStage.io.stallIf             := hazard.io.stallIF || idStage.io.holdIfId
+  ifStage.io.rasPredValid        := bpu.io.ras.topValid
+  ifStage.io.rasPredTarget       := bpu.io.ras.topAddr
   ifStage.io.nextLinePrefetchEn  := csrFile.io.prefetchCtrl(0)
 
   // ── ID Stage ──────────────────────────────────────────────────────────
@@ -90,7 +98,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   // cycle of a stall (the instruction that just "stopped" still retires once).
   val retireEnable = !hazard.io.stallWB || firstStallCycle
   wbRegWen := VecInit(wbStage.io.regWen.map(_ && retireEnable))
-  csrFile.io.instRetire := VecInit(wbStage.io.instRetire.map(_ && retireEnable))
+  val retireVec = VecInit(wbStage.io.instRetire.map(_ && retireEnable))
+  csrFile.io.instRetire := retireVec
 
   // ── Bypass Network ────────────────────────────────────────────────────
   bypass.io.idex      := idexReg
@@ -155,6 +164,46 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   hazard.io.backendStall := false.B
 
   // ── Pipeline register update logic ────────────────────────────────────
+  val retireCount = PopCount(retireVec)
+  val perfCycles = RegInit(0.U(64.W))
+  val perfRetire0 = RegInit(0.U(64.W))
+  val perfRetire1 = RegInit(0.U(64.W))
+  val perfRetire2 = RegInit(0.U(64.W))
+  val perfInstRetired = RegInit(0.U(64.W))
+  val perfIStall = RegInit(0.U(64.W))
+  val perfDStall = RegInit(0.U(64.W))
+  val perfLoadUse = RegInit(0.U(64.W))
+  val perfIdRedirect = RegInit(0.U(64.W))
+  val perfExRedirect = RegInit(0.U(64.W))
+  val perfRasPush = RegInit(0.U(64.W))
+  val perfRasPop = RegInit(0.U(64.W))
+
+  perfCycles := perfCycles + 1.U
+  when(retireCount === 0.U) { perfRetire0 := perfRetire0 + 1.U }
+  when(retireCount === 1.U) { perfRetire1 := perfRetire1 + 1.U }
+  when(retireCount === 2.U) { perfRetire2 := perfRetire2 + 1.U }
+  perfInstRetired := perfInstRetired + retireCount
+  when(ifStage.io.icacheStall) { perfIStall := perfIStall + 1.U }
+  when(memStage.io.dcacheStall) { perfDStall := perfDStall + 1.U }
+  when(hazard.io.loadUseStall) { perfLoadUse := perfLoadUse + 1.U }
+  when(idStage.io.idRedirectValid) { perfIdRedirect := perfIdRedirect + 1.U }
+  when(exStage.io.exRedirectValid) { perfExRedirect := perfExRedirect + 1.U }
+  when(idStage.io.rasPush) { perfRasPush := perfRasPush + 1.U }
+  when(idStage.io.rasPop) { perfRasPop := perfRasPop + 1.U }
+
+  io.perf.cycles            := perfCycles
+  io.perf.retire0Cycles     := perfRetire0
+  io.perf.retire1Cycles     := perfRetire1
+  io.perf.retire2Cycles     := perfRetire2
+  io.perf.instRetired       := perfInstRetired
+  io.perf.icacheStallCycles := perfIStall
+  io.perf.dcacheStallCycles := perfDStall
+  io.perf.loadUseStalls     := perfLoadUse
+  io.perf.idRedirects       := perfIdRedirect
+  io.perf.exRedirects       := perfExRedirect
+  io.perf.rasPushes         := perfRasPush
+  io.perf.rasPops           := perfRasPop
+
   when(hazard.io.flushIF) {
     ifidReg := VecInit(Seq.fill(issueWidth)(0.U.asTypeOf(new IFIDSlot)))
   }.elsewhen(!(hazard.io.stallIF || idStage.io.holdIfId)) {

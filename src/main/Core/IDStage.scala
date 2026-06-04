@@ -21,6 +21,9 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
 
     val idRedirectValid = Output(Bool())
     val idRedirectPc    = Output(UInt(32.W))
+    val rasPush         = Output(Bool())
+    val rasPushAddr     = Output(UInt(32.W))
+    val rasPop          = Output(Bool())
 
     val hazardIdValid               = Output(Vec(issueWidth, Bool()))
     val hazardRs1Addr               = Output(Vec(issueWidth, UInt(5.W)))
@@ -143,6 +146,18 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   io.idRedirectPc    := Mux(jal0,
     jalTarget0,
     jalTarget1)
+
+  private def isLinkReg(rd: UInt): Bool = rd === 1.U || rd === 5.U
+  private def isRetInst(d: DecodedSlot): Bool = {
+    d.isJalr && d.rdAddr === 0.U && d.rs1Addr === 1.U && d.imm === 0.U
+  }
+  val rasCall0 = canIssue0 && dec(0).io.out.isJump && isLinkReg(dec(0).io.out.rdAddr) && !isRetInst(dec(0).io.out)
+  val rasCall1 = canIssue1 && dec(1).io.out.isJump && isLinkReg(dec(1).io.out.rdAddr) && !isRetInst(dec(1).io.out)
+  val rasRet0  = canIssue0 && isRetInst(dec(0).io.out)
+  val rasRet1  = canIssue1 && isRetInst(dec(1).io.out)
+  io.rasPush     := rasCall0 || rasCall1
+  io.rasPushAddr := Mux(rasCall0, dec(0).io.out.pc + 4.U, dec(1).io.out.pc + 4.U)
+  io.rasPop      := !io.rasPush && (rasRet0 || rasRet1)
 
   // ── Pipeline register outputs ─────────────────────────────────────────
   for (i <- 0 until issueWidth) {

@@ -16,6 +16,7 @@ class SimTop(initFile: String, enableRV32M: Boolean = false) extends Module {
   val io = IO(new Bundle {
     val success   = Output(Bool())
     val printChar = Output(Valid(UInt(8.W)))
+    val perf      = Output(new CorePerfCounters)
   })
 
   val core   = Module(new InOrderCore(enableRV32M))
@@ -26,4 +27,5 @@ class SimTop(initFile: String, enableRV32M: Boolean = false) extends Module {
 
   io.success   := core.io.success
   io.printChar := core.io.printChar
+  io.perf      := core.io.perf
 }

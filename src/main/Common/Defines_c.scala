@@ -229,3 +229,18 @@ class MEMWBBundle extends Bundle {
   val csrRdata = UInt(32.W)
   val ctrl     = new PipelineControl
 }
+
+class CorePerfCounters extends Bundle {
+  val cycles            = UInt(64.W)
+  val retire0Cycles     = UInt(64.W)
+  val retire1Cycles     = UInt(64.W)
+  val retire2Cycles     = UInt(64.W)
+  val instRetired       = UInt(64.W)
+  val icacheStallCycles = UInt(64.W)
+  val dcacheStallCycles = UInt(64.W)
+  val loadUseStalls     = UInt(64.W)
+  val idRedirects       = UInt(64.W)
+  val exRedirects       = UInt(64.W)
+  val rasPushes         = UInt(64.W)
+  val rasPops           = UInt(64.W)
+}

@@ -359,6 +359,21 @@ class MEMWBBundle extends Bundle {
   val csrRdata = UInt(32.W)
   val ctrl     = new PipelineControl
 }
+
+class CorePerfCounters extends Bundle {
+  val cycles            = UInt(64.W)
+  val retire0Cycles     = UInt(64.W)
+  val retire1Cycles     = UInt(64.W)
+  val retire2Cycles     = UInt(64.W)
+  val instRetired       = UInt(64.W)
+  val icacheStallCycles = UInt(64.W)
+  val dcacheStallCycles = UInt(64.W)
+  val loadUseStalls     = UInt(64.W)
+  val idRedirects       = UInt(64.W)
+  val exRedirects       = UInt(64.W)
+  val rasPushes         = UInt(64.W)
+  val rasPops           = UInt(64.W)
+}
 ```
 
 ## src\main\Compat\ICacheMissFSMCompat.scala
@@ -1074,6 +1089,9 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
 
     val idRedirectValid = Output(Bool())
     val idRedirectPc    = Output(UInt(32.W))
+    val rasPush         = Output(Bool())
+    val rasPushAddr     = Output(UInt(32.W))
+    val rasPop          = Output(Bool())
 
     val hazardIdValid               = Output(Vec(issueWidth, Bool()))
     val hazardRs1Addr               = Output(Vec(issueWidth, UInt(5.W)))
@@ -1197,6 +1215,18 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
     jalTarget0,
     jalTarget1)
 
+  private def isLinkReg(rd: UInt): Bool = rd === 1.U || rd === 5.U
+  private def isRetInst(d: DecodedSlot): Bool = {
+    d.isJalr && d.rdAddr === 0.U && d.rs1Addr === 1.U && d.imm === 0.U
+  }
+  val rasCall0 = canIssue0 && dec(0).io.out.isJump && isLinkReg(dec(0).io.out.rdAddr) && !isRetInst(dec(0).io.out)
+  val rasCall1 = canIssue1 && dec(1).io.out.isJump && isLinkReg(dec(1).io.out.rdAddr) && !isRetInst(dec(1).io.out)
+  val rasRet0  = canIssue0 && isRetInst(dec(0).io.out)
+  val rasRet1  = canIssue1 && isRetInst(dec(1).io.out)
+  io.rasPush     := rasCall0 || rasCall1
+  io.rasPushAddr := Mux(rasCall0, dec(0).io.out.pc + 4.U, dec(1).io.out.pc + 4.U)
+  io.rasPop      := !io.rasPush && (rasRet0 || rasRet1)
+
   // 鈹€鈹€ Pipeline register outputs 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   for (i <- 0 until issueWidth) {
     val issue = if (i == 0) canIssue0 else canIssue1
@@ -1280,6 +1310,8 @@ class IFStage extends Module {
     val bpuQueryPc    = Output(UInt(32.W))
     val bpuPredTaken  = Input(Bool())
     val bpuPredTarget = Input(UInt(32.W))
+    val rasPredValid  = Input(Bool())
+    val rasPredTarget = Input(UInt(32.W))
 
     val nextLinePrefetchEn = Input(Bool())
 
@@ -1294,6 +1326,7 @@ class IFStage extends Module {
   val prefetcher = Module(new NextLinePrefetcher)
 
   private def isJal(inst: UInt): Bool = inst(6, 0) === "b1101111".U
+  private def isRet(inst: UInt): Bool = inst === "h00008067".U
   private def jalImm(inst: UInt): UInt = {
     Cat(Fill(11, inst(31)), inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
   }
@@ -1302,11 +1335,15 @@ class IFStage extends Module {
   val slotPc1 = pcGen.io.pcFetch + 4.U
   val slot0Jal = icache.io.instValids(0) && isJal(icache.io.insts(0))
   val slot1Jal = icache.io.instValids(1) && isJal(icache.io.insts(1))
+  val slot0Ret = icache.io.instValids(0) && isRet(icache.io.insts(0)) && io.rasPredValid
+  val slot1Ret = icache.io.instValids(1) && isRet(icache.io.insts(1)) && io.rasPredValid
   val slot0JalTarget = slotPc0 + jalImm(icache.io.insts(0))
   val slot1JalTarget = slotPc1 + jalImm(icache.io.insts(1))
-  val ifPredTaken = slot0Jal || io.bpuPredTaken || slot1Jal
+  val ifPredTaken = slot0Jal || slot0Ret || io.bpuPredTaken || slot1Jal || slot1Ret
   val ifPredTarget = Mux(slot0Jal, slot0JalTarget,
-    Mux(io.bpuPredTaken, io.bpuPredTarget, slot1JalTarget))
+    Mux(slot0Ret, io.rasPredTarget,
+      Mux(io.bpuPredTaken, io.bpuPredTarget,
+        Mux(slot1Jal, slot1JalTarget, io.rasPredTarget))))
 
   pcGen.io.exRedirectValid := io.exRedirectValid
   pcGen.io.exRedirectPc    := io.exRedirectPc
@@ -1339,17 +1376,21 @@ class IFStage extends Module {
   for (i <- 0 until issueWidth) {
     val slotPc = pcGen.io.pcFetch + (i * 4).U
     val slotJal = if (i == 0) slot0Jal else slot1Jal
+    val slotRet = if (i == 0) slot0Ret else slot1Ret
     val slotJalTarget = if (i == 0) slot0JalTarget else slot1JalTarget
     val slotPredNextPc = Mux(slotJal, slotJalTarget,
+      Mux(slotRet, io.rasPredTarget,
       Mux(io.bpuPredTaken, io.bpuPredTarget, slotPc + 4.U))
+    )
 
     io.out(i) := 0.U.asTypeOf(new IFIDSlot)
     io.out(i).pc := slotPc
     io.out(i).inst := icache.io.insts(i)
     io.out(i).slotIdx := i.U
     io.out(i).fetchPc := pcGen.io.pcFetch
-    io.out(i).predTaken := slotJal || io.bpuPredTaken
-    io.out(i).predTarget := Mux(slotJal, slotJalTarget, io.bpuPredTarget)
+    io.out(i).predTaken := slotJal || slotRet || io.bpuPredTaken
+    io.out(i).predTarget := Mux(slotJal, slotJalTarget,
+      Mux(slotRet, io.rasPredTarget, io.bpuPredTarget))
     io.out(i).predNextPc := slotPredNextPc
     io.out(i).seqNextPc := seqNextPc
     io.out(i).icacheHit := icache.io.respValid
@@ -1381,6 +1422,7 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
     val printChar = Output(Valid(UInt(8.W)))
     val success   = Output(Bool())
     val debugPc   = Output(UInt(32.W))
+    val perf      = Output(new CorePerfCounters)
   })
 
   val ifStage  = Module(new IFStage)
@@ -1390,7 +1432,7 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   val wbStage  = Module(new WBStage)
   val regFile  = Module(new RegFile(issueWidth))
   val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M))
-  val bpu      = Module(new BPU)
+  val bpu      = Module(new BPU_RAS)
   val bypass   = Module(new PipelineBypassUnit(issueWidth))
   val hazard   = Module(new BypassHazardUnit(issueWidth))
 
@@ -1413,6 +1455,11 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   bpu.io.updatePc     := exStage.io.bpuUpdatePc
   bpu.io.updateTaken  := exStage.io.bpuUpdateTaken
   bpu.io.updateTarget := exStage.io.bpuUpdateTarget
+  bpu.io.ras.push       := idStage.io.rasPush
+  bpu.io.ras.pushAddr   := idStage.io.rasPushAddr
+  bpu.io.ras.pop        := idStage.io.rasPop
+  bpu.io.ras.flush      := false.B
+  bpu.io.ras.checkpoint := 0.U
 
   // 鈹€鈹€ IF Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   ifStage.io.exRedirectValid     := exStage.io.exRedirectValid
@@ -1421,6 +1468,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   ifStage.io.idRedirectPc        := idStage.io.idRedirectPc
   ifStage.io.flushIf             := hazard.io.flushIF
   ifStage.io.stallIf             := hazard.io.stallIF || idStage.io.holdIfId
+  ifStage.io.rasPredValid        := bpu.io.ras.topValid
+  ifStage.io.rasPredTarget       := bpu.io.ras.topAddr
   ifStage.io.nextLinePrefetchEn  := csrFile.io.prefetchCtrl(0)
 
   // 鈹€鈹€ ID Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
@@ -1457,7 +1506,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   // cycle of a stall (the instruction that just "stopped" still retires once).
   val retireEnable = !hazard.io.stallWB || firstStallCycle
   wbRegWen := VecInit(wbStage.io.regWen.map(_ && retireEnable))
-  csrFile.io.instRetire := VecInit(wbStage.io.instRetire.map(_ && retireEnable))
+  val retireVec = VecInit(wbStage.io.instRetire.map(_ && retireEnable))
+  csrFile.io.instRetire := retireVec
 
   // 鈹€鈹€ Bypass Network 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   bypass.io.idex      := idexReg
@@ -1522,6 +1572,46 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   hazard.io.backendStall := false.B
 
   // 鈹€鈹€ Pipeline register update logic 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  val retireCount = PopCount(retireVec)
+  val perfCycles = RegInit(0.U(64.W))
+  val perfRetire0 = RegInit(0.U(64.W))
+  val perfRetire1 = RegInit(0.U(64.W))
+  val perfRetire2 = RegInit(0.U(64.W))
+  val perfInstRetired = RegInit(0.U(64.W))
+  val perfIStall = RegInit(0.U(64.W))
+  val perfDStall = RegInit(0.U(64.W))
+  val perfLoadUse = RegInit(0.U(64.W))
+  val perfIdRedirect = RegInit(0.U(64.W))
+  val perfExRedirect = RegInit(0.U(64.W))
+  val perfRasPush = RegInit(0.U(64.W))
+  val perfRasPop = RegInit(0.U(64.W))
+
+  perfCycles := perfCycles + 1.U
+  when(retireCount === 0.U) { perfRetire0 := perfRetire0 + 1.U }
+  when(retireCount === 1.U) { perfRetire1 := perfRetire1 + 1.U }
+  when(retireCount === 2.U) { perfRetire2 := perfRetire2 + 1.U }
+  perfInstRetired := perfInstRetired + retireCount
+  when(ifStage.io.icacheStall) { perfIStall := perfIStall + 1.U }
+  when(memStage.io.dcacheStall) { perfDStall := perfDStall + 1.U }
+  when(hazard.io.loadUseStall) { perfLoadUse := perfLoadUse + 1.U }
+  when(idStage.io.idRedirectValid) { perfIdRedirect := perfIdRedirect + 1.U }
+  when(exStage.io.exRedirectValid) { perfExRedirect := perfExRedirect + 1.U }
+  when(idStage.io.rasPush) { perfRasPush := perfRasPush + 1.U }
+  when(idStage.io.rasPop) { perfRasPop := perfRasPop + 1.U }
+
+  io.perf.cycles            := perfCycles
+  io.perf.retire0Cycles     := perfRetire0
+  io.perf.retire1Cycles     := perfRetire1
+  io.perf.retire2Cycles     := perfRetire2
+  io.perf.instRetired       := perfInstRetired
+  io.perf.icacheStallCycles := perfIStall
+  io.perf.dcacheStallCycles := perfDStall
+  io.perf.loadUseStalls     := perfLoadUse
+  io.perf.idRedirects       := perfIdRedirect
+  io.perf.exRedirects       := perfExRedirect
+  io.perf.rasPushes         := perfRasPush
+  io.perf.rasPops           := perfRasPop
+
   when(hazard.io.flushIF) {
     ifidReg := VecInit(Seq.fill(issueWidth)(0.U.asTypeOf(new IFIDSlot)))
   }.elsewhen(!(hazard.io.stallIF || idStage.io.holdIfId)) {
@@ -3200,6 +3290,7 @@ class RASInterface extends Bundle {
   val pushAddr   = Input(UInt(32.W))
   val pop        = Input(Bool())
   val topAddr    = Output(UInt(32.W))
+  val topValid   = Output(Bool())
   val flush      = Input(Bool())
   val checkpoint = Input(UInt(4.W))
 }
@@ -3295,17 +3386,26 @@ class BPU_RAS extends Module {
   // RAS
   val rasStack = RegInit(VecInit(Seq.fill(16)(0.U(32.W))))
   val rasPtr   = RegInit(0.U(4.W))
+  val rasCount = RegInit(0.U(5.W))
 
   io.ras.topAddr := rasStack(rasPtr)
+  io.ras.topValid := rasCount =/= 0.U
 
   when(io.ras.flush) {
     rasPtr := io.ras.checkpoint
+    rasCount := 0.U
   } .elsewhen(io.ras.push) {
     val nextPtr = (rasPtr + 1.U)(3, 0)
     rasStack(nextPtr) := io.ras.pushAddr
     rasPtr            := nextPtr
+    when(rasCount =/= 16.U) {
+      rasCount := rasCount + 1.U
+    }
   } .elsewhen(io.ras.pop) {
     rasPtr := (rasPtr - 1.U)(3, 0)
+    when(rasCount =/= 0.U) {
+      rasCount := rasCount - 1.U
+    }
   }
 }
 ```
@@ -4358,6 +4458,7 @@ class Top(enableRV32M: Boolean = false) extends Module {
     val success = Output(Bool())
     val printChar = Output(Valid(UInt(8.W)))
     val debugPc = Output(UInt(32.W))
+    val perf = Output(new CorePerfCounters)
   })
 
   val core = Module(new InOrderCore(enableRV32M))
@@ -4370,6 +4471,7 @@ class Top(enableRV32M: Boolean = false) extends Module {
   io.success := core.io.success
   io.printChar := core.io.printChar
   io.debugPc := core.io.debugPc
+  io.perf := core.io.perf
 }
 
 object Elaborate extends App {

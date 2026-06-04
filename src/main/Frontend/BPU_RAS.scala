@@ -8,6 +8,7 @@ class RASInterface extends Bundle {
   val pushAddr   = Input(UInt(32.W))
   val pop        = Input(Bool())
   val topAddr    = Output(UInt(32.W))
+  val topValid   = Output(Bool())
   val flush      = Input(Bool())
   val checkpoint = Input(UInt(4.W))
 }
@@ -105,16 +106,25 @@ class BPU_RAS extends Module {
   // RAS
   val rasStack = RegInit(VecInit(Seq.fill(16)(0.U(32.W))))
   val rasPtr   = RegInit(0.U(4.W))
+  val rasCount = RegInit(0.U(5.W))
 
   io.ras.topAddr := rasStack(rasPtr)
+  io.ras.topValid := rasCount =/= 0.U
 
   when(io.ras.flush) {
     rasPtr := io.ras.checkpoint
+    rasCount := 0.U
   } .elsewhen(io.ras.push) {
     val nextPtr = (rasPtr + 1.U)(3, 0)
     rasStack(nextPtr) := io.ras.pushAddr
     rasPtr            := nextPtr
+    when(rasCount =/= 16.U) {
+      rasCount := rasCount + 1.U
+    }
   } .elsewhen(io.ras.pop) {
     rasPtr := (rasPtr - 1.U)(3, 0)
+    when(rasCount =/= 0.U) {
+      rasCount := rasCount - 1.U
+    }
   }
 }
