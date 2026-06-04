@@ -4,9 +4,8 @@ import chisel3._
 import chisel3.util._
 import parameterized_cache.{CacheParams, DCacheTop, MemBusIO}
 
-class MEMStage extends Module {
+class MEMStage(p: CacheParams = CacheParams.default) extends Module {
   val issueWidth = 2
-  private val p = CacheParams(32, 32, 8 * 1024, 4, 64)
 
   val io = IO(new Bundle {
     val in = Input(Vec(issueWidth, new EXMEMBundle))
@@ -15,6 +14,8 @@ class MEMStage extends Module {
     val mtimeLo = Input(UInt(32.W))
     val mtimeHi = Input(UInt(32.W))
     val dcacheFlush = Input(Bool())
+    val stridePrefetchEn = Input(Bool())
+    val streamPrefetchEn = Input(Bool())
     val dcacheStall = Output(Bool())
     val printChar   = Output(Valid(UInt(8.W)))
     // P0 fix: expose success signal for test-completion detection
@@ -25,6 +26,8 @@ class MEMStage extends Module {
   })
 
   val dcache = Module(new DCacheTop(p))
+  val stridePrefetcher = Module(new StridePrefetcher)
+  val streamPrefetcher = Module(new StreamPrefetcher)
 
   val slotValid = Wire(Vec(issueWidth, Bool()))
   val slotMem   = Wire(Vec(issueWidth, Bool()))
@@ -67,6 +70,27 @@ class MEMStage extends Module {
   dcache.io.mtimeHi := io.mtimeHi
   io.dmem <> dcache.io.mem
 
+  val dcacheBusy = dcache.io.stall || dcache.io.missOut
+  val pfAddrCacheable =
+    (memAddr =/= "h10001FF0".U(32.W)) &&
+    (memAddr =/= "h10001FF1".U(32.W)) &&
+    (memAddr =/= "h0000BFF8".U(32.W)) &&
+    (memAddr =/= "h0000BFFC".U(32.W))
+  val pfObserve = memReqValid && pfAddrCacheable
+  stridePrefetcher.io.observeValid := pfObserve
+  stridePrefetcher.io.observeAddr  := memAddr
+  stridePrefetcher.io.prefetchEn   := io.stridePrefetchEn
+  streamPrefetcher.io.observeValid := pfObserve
+  streamPrefetcher.io.observeAddr  := memAddr
+  streamPrefetcher.io.prefetchEn   := io.streamPrefetchEn
+
+  val pfSelStream = streamPrefetcher.io.pfReqValid
+  val pfSelStride = !pfSelStream && stridePrefetcher.io.pfReqValid
+  dcache.io.pfReqValid := pfSelStream || pfSelStride
+  dcache.io.pfReqAddr  := Mux(pfSelStream, streamPrefetcher.io.pfReqAddr, stridePrefetcher.io.pfReqAddr)
+  streamPrefetcher.io.pfReqReady := dcache.io.pfReqReady && pfSelStream
+  stridePrefetcher.io.pfReqReady := dcache.io.pfReqReady && pfSelStride
+
   val printPc   = io.in(memIdx).pc
   val printBits = io.in(memIdx).rs2Data(7, 0)
 
@@ -89,7 +113,7 @@ class MEMStage extends Module {
   val printValidReg = RegNext(printFire, false.B)
   val printBitsReg  = RegEnable(printBits, 0.U(8.W), printFire)
 
-  io.dcacheStall := dcache.io.stall || dcache.io.missOut
+  io.dcacheStall := dcacheBusy
   io.printChar.valid := printValidReg
   io.printChar.bits  := printBitsReg
   io.success     := dcache.io.success   // P0 fix

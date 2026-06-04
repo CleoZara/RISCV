@@ -7,6 +7,10 @@ class DCacheMissFSMIO(p: CacheParams) extends Bundle {
   val missValid   = Input(Bool())
   val missTag     = Input(UInt(p.TAG_W.W))
   val missIsStore = Input(Bool())
+  val missIsPrefetch = Input(Bool())
+  val missWordOff = Input(UInt(p.WORD_CNT_W.W))
+  val missWdata   = Input(UInt(p.DATA_WIDTH.W))
+  val missWmask   = Input(UInt(p.WMASK_BITS.W))
 
   val evictIdx    = Input(UInt(p.INDEX_W.W))
   val evictWay    = Input(UInt(p.WAY_W.W))
@@ -26,6 +30,7 @@ class DCacheMissFSMIO(p: CacheParams) extends Bundle {
   val refillIsStore = Output(Bool())
 
   val stall       = Output(Bool())
+  val isIdle      = Output(Bool())
 }
 
 class DCacheMissFSM(p: CacheParams) extends Module {
@@ -41,6 +46,10 @@ class DCacheMissFSM(p: CacheParams) extends Module {
   val way       = Reg(UInt(p.WAY_W.W))
   val dirty     = Reg(Bool())
   val isStore   = Reg(Bool())
+  val isPrefetch = Reg(Bool())
+  val storeWordOff = Reg(UInt(p.WORD_CNT_W.W))
+  val storeWdata   = Reg(UInt(p.DATA_WIDTH.W))
+  val storeWmask   = Reg(UInt(p.WMASK_BITS.W))
   val wordCnt   = Reg(UInt(p.WORD_CNT_W.W))
   val lineBuf   = Reg(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
 
@@ -65,6 +74,10 @@ class DCacheMissFSM(p: CacheParams) extends Module {
     way      := io.evictWay
     dirty    := io.evictDirty
     isStore  := io.missIsStore
+    isPrefetch := io.missIsPrefetch
+    storeWordOff := io.missWordOff
+    storeWdata   := io.missWdata
+    storeWmask   := io.missWmask
     wordCnt  := 0.U
     lineBuf  := io.evictLine
   }.elsewhen(state === sRefillResp && io.mem.resp.fire) {
@@ -92,9 +105,13 @@ class DCacheMissFSM(p: CacheParams) extends Module {
   io.refillWay    := way
   io.refillIdx    := idx
   io.refillWord   := wordCnt
-  io.refillData   := lineBuf(wordCnt)
+  val storeByteMask = Cat((0 until p.WMASK_BITS).reverse.map(i => Fill(8, storeWmask(i))))
+  val refillRawData = lineBuf(wordCnt)
+  val refillStoreData = (storeWdata & storeByteMask) | (refillRawData & ~storeByteMask)
+  io.refillData   := Mux(isStore && (wordCnt === storeWordOff), refillStoreData, refillRawData)
   io.refillTag    := missTag
   io.refillDone   := state === sDone
   io.refillIsStore := isStore
-  io.stall        := state =/= sIdle
+  io.stall        := state =/= sIdle && !isPrefetch
+  io.isIdle       := state === sIdle
 }

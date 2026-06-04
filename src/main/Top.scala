@@ -4,8 +4,12 @@ import chisel3._
 import chisel3.util._
 import parameterized_cache.{CacheParams, MemBusIO}
 
-class Top(enableRV32M: Boolean = false) extends Module {
-  private val p = CacheParams(32, 32, 8 * 1024, 4, 64)
+class Top(
+    enableRV32M: Boolean = false,
+    cacheParams: CacheParams = CacheParams.default,
+    dCacheParams: Option[CacheParams] = None) extends Module {
+  private val ip = cacheParams
+  private val dp = dCacheParams.getOrElse(cacheParams)
 
   val io = IO(new Bundle {
     val status = Output(Bool())
@@ -15,8 +19,8 @@ class Top(enableRV32M: Boolean = false) extends Module {
     val perf = Output(new CorePerfCounters)
   })
 
-  val core = Module(new InOrderCore(enableRV32M))
-  val memory = Module(new RV32DualPortMemory(p))
+  val core = Module(new InOrderCore(enableRV32M, ip, Some(dp)))
+  val memory = Module(new RV32DualPortMemory(ip))
 
   memory.io.imem <> core.io.imem
   memory.io.dmem <> core.io.dmem

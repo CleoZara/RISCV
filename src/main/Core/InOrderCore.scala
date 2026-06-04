@@ -4,23 +4,27 @@ import chisel3._
 import chisel3.util._
 import parameterized_cache.{CacheParams, MemBusIO}
 
-class InOrderCore(enableRV32M: Boolean = false) extends Module {
+class InOrderCore(
+    enableRV32M: Boolean = false,
+    cacheParams: CacheParams = CacheParams.default,
+    dCacheParams: Option[CacheParams] = None) extends Module {
   val issueWidth = 2
-  private val p = CacheParams(32, 32, 8 * 1024, 4, 64)
+  private val ip = cacheParams
+  private val dp = dCacheParams.getOrElse(cacheParams)
 
   val io = IO(new Bundle {
-    val imem      = new MemBusIO(p)
-    val dmem      = new MemBusIO(p)
+    val imem      = new MemBusIO(ip)
+    val dmem      = new MemBusIO(dp)
     val printChar = Output(Valid(UInt(8.W)))
     val success   = Output(Bool())
     val debugPc   = Output(UInt(32.W))
     val perf      = Output(new CorePerfCounters)
   })
 
-  val ifStage  = Module(new IFStage)
+  val ifStage  = Module(new IFStage(ip))
   val idStage  = Module(new IDStage(enableRV32M))
   val exStage  = Module(new EXStage(enableRV32M))
-  val memStage = Module(new MEMStage)
+  val memStage = Module(new MEMStage(dp))
   val wbStage  = Module(new WBStage)
   val regFile  = Module(new RegFile(issueWidth))
   val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M))
@@ -63,6 +67,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   ifStage.io.rasPredValid        := bpu.io.ras.topValid
   ifStage.io.rasPredTarget       := bpu.io.ras.topAddr
   ifStage.io.nextLinePrefetchEn  := csrFile.io.prefetchCtrl(0)
+  ifStage.io.stridePrefetchEn    := csrFile.io.prefetchCtrl(1)
+  ifStage.io.streamPrefetchEn    := csrFile.io.prefetchCtrl(2)
 
   // ── ID Stage ──────────────────────────────────────────────────────────
   idStage.io.in         := ifidReg
@@ -133,6 +139,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   memStage.io.mtimeLo    := csrFile.io.mtimeLo
   memStage.io.mtimeHi    := csrFile.io.mtimeHi
   memStage.io.dcacheFlush := false.B
+  memStage.io.stridePrefetchEn := csrFile.io.prefetchCtrl(1)
+  memStage.io.streamPrefetchEn := csrFile.io.prefetchCtrl(2)
 
   // ── WB Stage ──────────────────────────────────────────────────────────
   wbStage.io.in := memwbReg

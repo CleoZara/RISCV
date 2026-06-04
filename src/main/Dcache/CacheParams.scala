@@ -36,3 +36,13 @@ class TagEntry(p: CacheParams) extends Bundle {
   val dirty = Bool()
   val tag   = UInt(p.TAG_W.W)
 }
+
+object CacheParams {
+  val default: CacheParams = CacheParams(
+    ADDR_WIDTH = 32,
+    DATA_WIDTH = 32,
+    CACHE_SIZE = 8 * 1024,
+    WAY_NUM    = 4,
+    LINE_BYTES = 64
+  )
+}

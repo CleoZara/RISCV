@@ -601,3 +601,15 @@ EX 级应把 `rs1Data` 作为 `wdata`，CSRFile 输出 `oldData`，随后 WB 通
 ### CSR 双发限制
 
 由于当前 CSRFile 只有一个读端口和一个写请求端口，基础顺序核应在 ID 级限制同周期最多一条 CSR 指令进入 EX。若槽 0 和槽 1 都是 CSR 指令，应只发射槽 0，槽 1 下一周期重新尝试。
+
+## Prefetch Update
+
+Current prefetch control uses CSR `0x7C0`:
+
+| Bit | Name | Scope |
+| --- | --- | --- |
+| `prefetchCtrl(0)` | `nextLinePrefetchEn` | Enables IF/I-Cache next-line prefetch. |
+| `prefetchCtrl(1)` | `stridePrefetchEn` | Enables IF/I-Cache and MEM/D-Cache stride prefetch. |
+| `prefetchCtrl(2)` | `streamPrefetchEn` | Enables IF/I-Cache and MEM/D-Cache stream prefetch. |
+
+D-Cache now exposes `pfReqValid`, `pfReqReady`, and `pfReqAddr`. Demand load/store miss has priority over prefetch. A D-Cache prefetch miss may occupy the memory refill FSM, but it must not directly freeze the pipeline unless a demand miss arrives while the FSM is busy.

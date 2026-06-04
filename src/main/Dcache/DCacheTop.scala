@@ -25,13 +25,32 @@ class DCacheTop(p: CacheParams) extends Module {
     // P0 fix: success signal propagated from halt MMIO write
     val success   = Output(Bool())
 
+    val pfReqValid = Input(Bool())
+    val pfReqReady = Output(Bool())
+    val pfReqAddr  = Input(UInt(p.ADDR_WIDTH.W))
+
     val mem = new MemBusIO(p)
   })
 
-  val addrTag  = io.addr(p.ADDR_WIDTH - 1, p.OFFSET_W + p.INDEX_W)
-  val addrIdx  = io.addr(p.OFFSET_W + p.INDEX_W - 1, p.OFFSET_W)
-  val addrWoff = io.addr(p.OFFSET_W - 1, 2)
-  val addrBoff = io.addr(1, 0)
+  require(p.ADDR_WIDTH >= 22, "DCacheTop expects at least 22-bit physical addresses")
+  private def toPhysAddr(addr: UInt): UInt = {
+    Cat(0.U((p.ADDR_WIDTH - 22).W), addr(21, 0))
+  }
+
+  // The simulation memory is addressed by low 22 bits.  Dhrystone uses both
+  // high reset-vector aliases (0x8002_xxxx via gp) and low absolute data
+  // addresses (0x0002_xxxx via lui), so cache lookup must use the same
+  // canonical physical address as the memory model.  MMIO checks below still
+  // use the original full address.
+  val cacheAddr = toPhysAddr(io.addr)
+  val pfCacheAddr = toPhysAddr(io.pfReqAddr)
+
+  val addrTag  = cacheAddr(p.ADDR_WIDTH - 1, p.OFFSET_W + p.INDEX_W)
+  val addrIdx  = cacheAddr(p.OFFSET_W + p.INDEX_W - 1, p.OFFSET_W)
+  val addrWoff = cacheAddr(p.OFFSET_W - 1, 2)
+  val addrBoff = cacheAddr(1, 0)
+  val pfTag    = pfCacheAddr(p.ADDR_WIDTH - 1, p.OFFSET_W + p.INDEX_W)
+  val pfIdx    = pfCacheAddr(p.OFFSET_W + p.INDEX_W - 1, p.OFFSET_W)
 
   // -------------------------------------------------------------------
   // Special / MMIO addresses
@@ -52,6 +71,10 @@ class DCacheTop(p: CacheParams) extends Module {
   // P0 fix: halt address is uncacheable
   val addrIsHalt    = io.addr === ADDR_HALT
   val isBypass      = addrIsPrintf || addrIsMtimeLo || addrIsMtimeHi || addrIsHalt
+  val pfIsBypass    = (io.pfReqAddr === ADDR_PRINTF) ||
+                      (io.pfReqAddr === ADDR_HALT) ||
+                      (io.pfReqAddr === ADDR_MTIME_LO) ||
+                      (io.pfReqAddr === ADDR_MTIME_HI)
 
   val isMtimeLo = addrIsMtimeLo && io.memRen
   val isMtimeHi = addrIsMtimeHi && io.memRen
@@ -60,7 +83,7 @@ class DCacheTop(p: CacheParams) extends Module {
   // while the assembly smoke tests write 1.
   val isHaltWrite = addrIsHalt && io.wen
   val successReg  = RegInit(false.B)
-  when(isHaltWrite && io.wdata =/= 0.U) { successReg := true.B }
+  when(isHaltWrite && (io.wdata =/= 0.U)) { successReg := true.B }
   io.success := successReg
 
   val tagArray  = Module(new TagArray(p))
@@ -70,18 +93,22 @@ class DCacheTop(p: CacheParams) extends Module {
   val loadExt   = Module(new LoadExtend(p))
   val missFsm   = Module(new DCacheMissFSM(p))
 
-  hitTest.io.tagData := tagArray.io.tagData
-  hitTest.io.tag     := addrTag
-  hitTest.io.memRen  := io.memRen
-  hitTest.io.wen     := io.wen
+  val demandReq = (io.memRen || io.wen) && !isBypass
+  val queryPrefetch = missFsm.io.isIdle && io.pfReqValid && !demandReq && !pfIsBypass
 
-  val isHit  = hitTest.io.isHit && !isBypass
+  hitTest.io.tagData := tagArray.io.tagData
+  hitTest.io.tag     := Mux(queryPrefetch, pfTag, addrTag)
+  hitTest.io.memRen  := Mux(queryPrefetch, true.B, io.memRen)
+  hitTest.io.wen     := Mux(queryPrefetch, false.B, io.wen)
+
+  val pfMiss = queryPrefetch && hitTest.io.missValid
+  val isHit  = hitTest.io.isHit && !isBypass && !queryPrefetch
   val hitWay = hitTest.io.hitWay
-  val cacheMiss = hitTest.io.missValid && !isBypass
+  val cacheMiss = hitTest.io.missValid && !isBypass && !queryPrefetch
 
   // TagArray
   tagArray.io.flush       := io.flush
-  tagArray.io.idx         := addrIdx
+  tagArray.io.idx         := Mux(queryPrefetch, pfIdx, addrIdx)
   tagArray.io.refillTagEn := missFsm.io.refillDone
   tagArray.io.refillWay   := missFsm.io.refillWay
   tagArray.io.refillIdx   := missFsm.io.refillIdx
@@ -91,7 +118,7 @@ class DCacheTop(p: CacheParams) extends Module {
   tagArray.io.setDirtyWay := hitWay
 
   // PLRU
-  plru.io.idx       := addrIdx
+  plru.io.idx       := Mux(queryPrefetch, pfIdx, addrIdx)
   plru.io.updateEn  := ((isHit && (io.memRen || io.wen)) || missFsm.io.refillDone) && !isBypass
   plru.io.updateWay := Mux(missFsm.io.refillDone, missFsm.io.refillWay, hitWay)
 
@@ -107,7 +134,7 @@ class DCacheTop(p: CacheParams) extends Module {
   dataArray.io.refillIdx    := missFsm.io.refillIdx
   dataArray.io.refillWord   := missFsm.io.refillWord
   dataArray.io.refillData   := missFsm.io.refillData
-  dataArray.io.evictIdx     := addrIdx
+  dataArray.io.evictIdx     := Mux(queryPrefetch, pfIdx, addrIdx)
   dataArray.io.evictWay     := plru.io.evictWay
 
   // LoadExt
@@ -118,14 +145,19 @@ class DCacheTop(p: CacheParams) extends Module {
   loadExt.io.rawData := dataArray.io.rawData
 
   // Miss FSM
-  missFsm.io.missValid   := cacheMiss
-  missFsm.io.missTag     := addrTag
-  missFsm.io.missIsStore := io.wen
-  missFsm.io.evictIdx    := addrIdx
+  missFsm.io.missValid   := cacheMiss || pfMiss
+  missFsm.io.missTag     := Mux(pfMiss, pfTag, addrTag)
+  missFsm.io.missIsStore := cacheMiss && io.wen
+  missFsm.io.missIsPrefetch := pfMiss
+  missFsm.io.missWordOff := addrWoff
+  missFsm.io.missWdata   := io.wdata
+  missFsm.io.missWmask   := io.wmask
+  missFsm.io.evictIdx    := Mux(pfMiss, pfIdx, addrIdx)
   missFsm.io.evictWay    := plru.io.evictWay
   missFsm.io.evictTag    := tagArray.io.tagData(plru.io.evictWay).tag
   missFsm.io.evictDirty  := tagArray.io.tagData(plru.io.evictWay).dirty
   missFsm.io.evictLine   := dataArray.io.evictLine
+  io.pfReqReady := missFsm.io.isIdle && !demandReq
 
   io.mem <> missFsm.io.mem
 

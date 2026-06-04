@@ -1,8 +1,8 @@
 ﻿# src/main source snapshot
 
-## src\main\Common\CSR.scala
+## src/main\Common\CSR.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -21,7 +21,7 @@ object CSRAddr {
   val minstreth     = "hB82".U(12.W)
   val mcountinhibit = "h320".U(12.W)
   val misa          = "h301".U(12.W)
-  val prefetchCtrl  = "h7C0".U(12.W) // 鑷畾涔夛細bit0=Next-line, bit1=Stride
+  val prefetchCtrl  = "h7C0".U(12.W) // bit0=next-line, bit1=stride, bit2=stream
 }
 
 // CSROp 鐜扮粺涓€瀹氫箟鍦?Defines_c.scala锛坥bject CSROp锛夛紝姝ゅ涓嶅啀閲嶅瀹氫箟銆?
@@ -123,11 +123,11 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
   io.mtimeHi    := mtime(63, 32)
   io.prefetchCtrl := prefetchCtrl
 }
-````
+```
 
-## src\main\Common\Defines_c.scala
+## src/main\Common\Defines_c.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -374,11 +374,11 @@ class CorePerfCounters extends Bundle {
   val rasPushes         = UInt(64.W)
   val rasPops           = UInt(64.W)
 }
-````
+```
 
-## src\main\Compat\ICacheMissFSMCompat.scala
+## src/main\Compat\ICacheMissFSMCompat.scala
 
-``scala
+```scala
 package icache
 
 import chisel3._
@@ -487,11 +487,11 @@ class ICacheMissFSM(p: CacheParams) extends Module {
   io.isIdle := state === sIdle
   io.pfReqReady := state === sIdle && !io.missValid
 }
-````
+```
 
-## src\main\Core\BypassHazardUnit.scala
+## src/main\Core\BypassHazardUnit.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -900,11 +900,11 @@ class BypassHazardUnit(
     io.wawStall := false.B
   }
 }
-````
+```
 
-## src\main\Core\EXStage.scala
+## src/main\Core\EXStage.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -1068,11 +1068,11 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
   io.bpuUpdateTarget := Mux(bpuFromSlot0, updateTarget0, updateTarget1)
 
 }
-````
+```
 
-## src\main\Core\IDStage.scala
+## src/main\Core\IDStage.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -1290,11 +1290,11 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
     io.hazardCanBypassToYounger(i) := (i == 0).B && slot0CanBypass
   }
 }
-````
+```
 
-## src\main\Core\IFStage.scala
+## src/main\Core\IFStage.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -1302,9 +1302,8 @@ import chisel3.util._
 import icache.ICacheTop
 import parameterized_cache.{CacheParams, MemBusIO}
 
-class IFStage extends Module {
+class IFStage(p: CacheParams = CacheParams.default) extends Module {
   val issueWidth = 2
-  private val p = ICacheTop.defaultParams
 
   val io = IO(new Bundle {
     val stallIf = Input(Bool())
@@ -1322,6 +1321,8 @@ class IFStage extends Module {
     val rasPredTarget = Input(UInt(32.W))
 
     val nextLinePrefetchEn = Input(Bool())
+    val stridePrefetchEn   = Input(Bool())
+    val streamPrefetchEn   = Input(Bool())
 
     val out = Output(Vec(issueWidth, new IFIDSlot))
     val icacheStall = Output(Bool())
@@ -1331,10 +1332,13 @@ class IFStage extends Module {
 
   val pcGen = Module(new PcGen(N = issueWidth))
   val icache = Module(new ICacheTop(p))
-  val prefetcher = Module(new NextLinePrefetcher)
+  val nextLinePrefetcher = Module(new NextLinePrefetcher)
+  val stridePrefetcher = Module(new StridePrefetcher)
+  val streamPrefetcher = Module(new StreamPrefetcher)
 
   private def isJal(inst: UInt): Bool = inst(6, 0) === "b1101111".U
   private def isRet(inst: UInt): Bool = inst === "h00008067".U
+  private def isBranch(inst: UInt): Bool = inst(6, 0) === "b1100011".U
   private def jalImm(inst: UInt): UInt = {
     Cat(Fill(11, inst(31)), inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
   }
@@ -1345,12 +1349,14 @@ class IFStage extends Module {
   val slot1Jal = icache.io.instValids(1) && isJal(icache.io.insts(1))
   val slot0Ret = icache.io.instValids(0) && isRet(icache.io.insts(0)) && io.rasPredValid
   val slot1Ret = icache.io.instValids(1) && isRet(icache.io.insts(1)) && io.rasPredValid
+  val slot0Branch = icache.io.instValids(0) && isBranch(icache.io.insts(0))
+  val bpuTaken = io.bpuPredTaken && slot0Branch
   val slot0JalTarget = slotPc0 + jalImm(icache.io.insts(0))
   val slot1JalTarget = slotPc1 + jalImm(icache.io.insts(1))
-  val ifPredTaken = slot0Jal || slot0Ret || io.bpuPredTaken || slot1Jal || slot1Ret
+  val ifPredTaken = slot0Jal || slot0Ret || bpuTaken || slot1Jal || slot1Ret
   val ifPredTarget = Mux(slot0Jal, slot0JalTarget,
     Mux(slot0Ret, io.rasPredTarget,
-      Mux(io.bpuPredTaken, io.bpuPredTarget,
+      Mux(bpuTaken, io.bpuPredTarget,
         Mux(slot1Jal, slot1JalTarget, io.rasPredTarget))))
 
   pcGen.io.exRedirectValid := io.exRedirectValid
@@ -1370,14 +1376,30 @@ class IFStage extends Module {
   icache.io.flush := false.B
   io.imem <> icache.io.mem
 
-  prefetcher.io.currAddr   := pcGen.io.currPc
-  prefetcher.io.cacheHit   := icache.io.respValid
-  prefetcher.io.cacheStall := icache.io.missOut
-  prefetcher.io.prefetchEn := io.nextLinePrefetchEn
+  val pfObserve = icache.io.respValid && !icache.io.missOut && !io.stallIf && !io.flushIf
 
-  icache.io.pfReqValid := prefetcher.io.pfReqValid
-  icache.io.pfReqAddr  := prefetcher.io.pfReqAddr
-  prefetcher.io.pfReqReady := icache.io.pfReqReady
+  nextLinePrefetcher.io.currAddr   := pcGen.io.currPc
+  nextLinePrefetcher.io.cacheHit   := icache.io.respValid
+  nextLinePrefetcher.io.cacheStall := icache.io.missOut
+  nextLinePrefetcher.io.prefetchEn := io.nextLinePrefetchEn
+
+  stridePrefetcher.io.observeValid := pfObserve
+  stridePrefetcher.io.observeAddr  := pcGen.io.currPc
+  stridePrefetcher.io.prefetchEn   := io.stridePrefetchEn
+
+  streamPrefetcher.io.observeValid := pfObserve
+  streamPrefetcher.io.observeAddr  := pcGen.io.currPc
+  streamPrefetcher.io.prefetchEn   := io.streamPrefetchEn
+
+  val pfSelStream = streamPrefetcher.io.pfReqValid
+  val pfSelStride = !pfSelStream && stridePrefetcher.io.pfReqValid
+  icache.io.pfReqValid := pfSelStream || pfSelStride || nextLinePrefetcher.io.pfReqValid
+  icache.io.pfReqAddr  := Mux(pfSelStream, streamPrefetcher.io.pfReqAddr,
+    Mux(pfSelStride, stridePrefetcher.io.pfReqAddr, nextLinePrefetcher.io.pfReqAddr))
+
+  streamPrefetcher.io.pfReqReady := icache.io.pfReqReady && pfSelStream
+  stridePrefetcher.io.pfReqReady := icache.io.pfReqReady && pfSelStride
+  nextLinePrefetcher.io.pfReqReady := icache.io.pfReqReady && !pfSelStream && !pfSelStride
 
   val seqStep = Mux(icache.io.instValids(1), (issueWidth * 4).U(32.W), 4.U(32.W))
   val seqNextPc = pcGen.io.pcFetch + seqStep
@@ -1388,7 +1410,7 @@ class IFStage extends Module {
     val slotJalTarget = if (i == 0) slot0JalTarget else slot1JalTarget
     val slotPredNextPc = Mux(slotJal, slotJalTarget,
       Mux(slotRet, io.rasPredTarget,
-      Mux(io.bpuPredTaken, io.bpuPredTarget, slotPc + 4.U))
+      Mux(bpuTaken, io.bpuPredTarget, slotPc + 4.U))
     )
 
     io.out(i) := 0.U.asTypeOf(new IFIDSlot)
@@ -1396,7 +1418,7 @@ class IFStage extends Module {
     io.out(i).inst := icache.io.insts(i)
     io.out(i).slotIdx := i.U
     io.out(i).fetchPc := pcGen.io.pcFetch
-    io.out(i).predTaken := slotJal || slotRet || io.bpuPredTaken
+    io.out(i).predTaken := slotJal || slotRet || bpuTaken
     io.out(i).predTarget := Mux(slotJal, slotJalTarget,
       Mux(slotRet, io.rasPredTarget, io.bpuPredTarget))
     io.out(i).predNextPc := slotPredNextPc
@@ -1409,34 +1431,38 @@ class IFStage extends Module {
 
   io.icacheStall := icache.io.missOut
 }
-````
+```
 
-## src\main\Core\InOrderCore.scala
+## src/main\Core\InOrderCore.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
 import chisel3.util._
 import parameterized_cache.{CacheParams, MemBusIO}
 
-class InOrderCore(enableRV32M: Boolean = false) extends Module {
+class InOrderCore(
+    enableRV32M: Boolean = false,
+    cacheParams: CacheParams = CacheParams.default,
+    dCacheParams: Option[CacheParams] = None) extends Module {
   val issueWidth = 2
-  private val p = CacheParams(32, 32, 8 * 1024, 4, 64)
+  private val ip = cacheParams
+  private val dp = dCacheParams.getOrElse(cacheParams)
 
   val io = IO(new Bundle {
-    val imem      = new MemBusIO(p)
-    val dmem      = new MemBusIO(p)
+    val imem      = new MemBusIO(ip)
+    val dmem      = new MemBusIO(dp)
     val printChar = Output(Valid(UInt(8.W)))
     val success   = Output(Bool())
     val debugPc   = Output(UInt(32.W))
     val perf      = Output(new CorePerfCounters)
   })
 
-  val ifStage  = Module(new IFStage)
+  val ifStage  = Module(new IFStage(ip))
   val idStage  = Module(new IDStage(enableRV32M))
   val exStage  = Module(new EXStage(enableRV32M))
-  val memStage = Module(new MEMStage)
+  val memStage = Module(new MEMStage(dp))
   val wbStage  = Module(new WBStage)
   val regFile  = Module(new RegFile(issueWidth))
   val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M))
@@ -1479,6 +1505,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   ifStage.io.rasPredValid        := bpu.io.ras.topValid
   ifStage.io.rasPredTarget       := bpu.io.ras.topAddr
   ifStage.io.nextLinePrefetchEn  := csrFile.io.prefetchCtrl(0)
+  ifStage.io.stridePrefetchEn    := csrFile.io.prefetchCtrl(1)
+  ifStage.io.streamPrefetchEn    := csrFile.io.prefetchCtrl(2)
 
   // 鈹€鈹€ ID Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   idStage.io.in         := ifidReg
@@ -1549,6 +1577,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   memStage.io.mtimeLo    := csrFile.io.mtimeLo
   memStage.io.mtimeHi    := csrFile.io.mtimeHi
   memStage.io.dcacheFlush := false.B
+  memStage.io.stridePrefetchEn := csrFile.io.prefetchCtrl(1)
+  memStage.io.streamPrefetchEn := csrFile.io.prefetchCtrl(2)
 
   // 鈹€鈹€ WB Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   wbStage.io.in := memwbReg
@@ -1640,20 +1670,19 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
     memwbReg := memStage.io.out
   }
 }
-````
+```
 
-## src\main\Core\MEMStage.scala
+## src/main\Core\MEMStage.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
 import chisel3.util._
 import parameterized_cache.{CacheParams, DCacheTop, MemBusIO}
 
-class MEMStage extends Module {
+class MEMStage(p: CacheParams = CacheParams.default) extends Module {
   val issueWidth = 2
-  private val p = CacheParams(32, 32, 8 * 1024, 4, 64)
 
   val io = IO(new Bundle {
     val in = Input(Vec(issueWidth, new EXMEMBundle))
@@ -1662,6 +1691,8 @@ class MEMStage extends Module {
     val mtimeLo = Input(UInt(32.W))
     val mtimeHi = Input(UInt(32.W))
     val dcacheFlush = Input(Bool())
+    val stridePrefetchEn = Input(Bool())
+    val streamPrefetchEn = Input(Bool())
     val dcacheStall = Output(Bool())
     val printChar   = Output(Valid(UInt(8.W)))
     // P0 fix: expose success signal for test-completion detection
@@ -1672,6 +1703,8 @@ class MEMStage extends Module {
   })
 
   val dcache = Module(new DCacheTop(p))
+  val stridePrefetcher = Module(new StridePrefetcher)
+  val streamPrefetcher = Module(new StreamPrefetcher)
 
   val slotValid = Wire(Vec(issueWidth, Bool()))
   val slotMem   = Wire(Vec(issueWidth, Bool()))
@@ -1714,6 +1747,27 @@ class MEMStage extends Module {
   dcache.io.mtimeHi := io.mtimeHi
   io.dmem <> dcache.io.mem
 
+  val dcacheBusy = dcache.io.stall || dcache.io.missOut
+  val pfAddrCacheable =
+    (memAddr =/= "h10001FF0".U(32.W)) &&
+    (memAddr =/= "h10001FF1".U(32.W)) &&
+    (memAddr =/= "h0000BFF8".U(32.W)) &&
+    (memAddr =/= "h0000BFFC".U(32.W))
+  val pfObserve = memReqValid && pfAddrCacheable
+  stridePrefetcher.io.observeValid := pfObserve
+  stridePrefetcher.io.observeAddr  := memAddr
+  stridePrefetcher.io.prefetchEn   := io.stridePrefetchEn
+  streamPrefetcher.io.observeValid := pfObserve
+  streamPrefetcher.io.observeAddr  := memAddr
+  streamPrefetcher.io.prefetchEn   := io.streamPrefetchEn
+
+  val pfSelStream = streamPrefetcher.io.pfReqValid
+  val pfSelStride = !pfSelStream && stridePrefetcher.io.pfReqValid
+  dcache.io.pfReqValid := pfSelStream || pfSelStride
+  dcache.io.pfReqAddr  := Mux(pfSelStream, streamPrefetcher.io.pfReqAddr, stridePrefetcher.io.pfReqAddr)
+  streamPrefetcher.io.pfReqReady := dcache.io.pfReqReady && pfSelStream
+  stridePrefetcher.io.pfReqReady := dcache.io.pfReqReady && pfSelStride
+
   val printPc   = io.in(memIdx).pc
   val printBits = io.in(memIdx).rs2Data(7, 0)
 
@@ -1736,7 +1790,7 @@ class MEMStage extends Module {
   val printValidReg = RegNext(printFire, false.B)
   val printBitsReg  = RegEnable(printBits, 0.U(8.W), printFire)
 
-  io.dcacheStall := dcache.io.stall || dcache.io.missOut
+  io.dcacheStall := dcacheBusy
   io.printChar.valid := printValidReg
   io.printChar.bits  := printBitsReg
   io.success     := dcache.io.success   // P0 fix
@@ -1757,11 +1811,11 @@ class MEMStage extends Module {
     io.out(i).ctrl.allowIn := true.B
   }
 }
-````
+```
 
-## src\main\Core\RegFile.scala
+## src/main\Core\RegFile.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -1802,11 +1856,11 @@ class RegFile(issueWidth: Int = 2) extends Module {
     regs(io.waddr(1)) := io.wdata(1)
   }
 }
-````
+```
 
-## src\main\Core\WBStage.scala
+## src/main\Core\WBStage.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -1850,11 +1904,11 @@ class WBStage extends Module {
     io.wbData(i) := data
   }
 }
-````
+```
 
-## src\main\Dcache\CacheParams.scala
+## src/main\Dcache\CacheParams.scala
 
-``scala
+```scala
 package parameterized_cache
 
 import chisel3._
@@ -1889,11 +1943,21 @@ class TagEntry(p: CacheParams) extends Bundle {
   val dirty = Bool()
   val tag   = UInt(p.TAG_W.W)
 }
-````
 
-## src\main\Dcache\DataArray.scala
+object CacheParams {
+  val default: CacheParams = CacheParams(
+    ADDR_WIDTH = 32,
+    DATA_WIDTH = 32,
+    CACHE_SIZE = 8 * 1024,
+    WAY_NUM    = 4,
+    LINE_BYTES = 64
+  )
+}
+```
 
-``scala
+## src/main\Dcache\DataArray.scala
+
+```scala
 package parameterized_cache
 
 import chisel3._
@@ -1938,11 +2002,11 @@ class DataArray(p: CacheParams) extends Module {
     dArray(io.hitWay)(io.idx)(io.wordsoff) := (io.wdata & byteMask) | (oldData & ~byteMask)
   }
 }
-````
+```
 
-## src\main\Dcache\DCacheMissFSM.scala
+## src/main\Dcache\DCacheMissFSM.scala
 
-``scala
+```scala
 package parameterized_cache
 
 import chisel3._
@@ -1952,6 +2016,10 @@ class DCacheMissFSMIO(p: CacheParams) extends Bundle {
   val missValid   = Input(Bool())
   val missTag     = Input(UInt(p.TAG_W.W))
   val missIsStore = Input(Bool())
+  val missIsPrefetch = Input(Bool())
+  val missWordOff = Input(UInt(p.WORD_CNT_W.W))
+  val missWdata   = Input(UInt(p.DATA_WIDTH.W))
+  val missWmask   = Input(UInt(p.WMASK_BITS.W))
 
   val evictIdx    = Input(UInt(p.INDEX_W.W))
   val evictWay    = Input(UInt(p.WAY_W.W))
@@ -1971,6 +2039,7 @@ class DCacheMissFSMIO(p: CacheParams) extends Bundle {
   val refillIsStore = Output(Bool())
 
   val stall       = Output(Bool())
+  val isIdle      = Output(Bool())
 }
 
 class DCacheMissFSM(p: CacheParams) extends Module {
@@ -1986,6 +2055,10 @@ class DCacheMissFSM(p: CacheParams) extends Module {
   val way       = Reg(UInt(p.WAY_W.W))
   val dirty     = Reg(Bool())
   val isStore   = Reg(Bool())
+  val isPrefetch = Reg(Bool())
+  val storeWordOff = Reg(UInt(p.WORD_CNT_W.W))
+  val storeWdata   = Reg(UInt(p.DATA_WIDTH.W))
+  val storeWmask   = Reg(UInt(p.WMASK_BITS.W))
   val wordCnt   = Reg(UInt(p.WORD_CNT_W.W))
   val lineBuf   = Reg(Vec(p.LINE_WORDS, UInt(p.DATA_WIDTH.W)))
 
@@ -2010,6 +2083,10 @@ class DCacheMissFSM(p: CacheParams) extends Module {
     way      := io.evictWay
     dirty    := io.evictDirty
     isStore  := io.missIsStore
+    isPrefetch := io.missIsPrefetch
+    storeWordOff := io.missWordOff
+    storeWdata   := io.missWdata
+    storeWmask   := io.missWmask
     wordCnt  := 0.U
     lineBuf  := io.evictLine
   }.elsewhen(state === sRefillResp && io.mem.resp.fire) {
@@ -2037,17 +2114,21 @@ class DCacheMissFSM(p: CacheParams) extends Module {
   io.refillWay    := way
   io.refillIdx    := idx
   io.refillWord   := wordCnt
-  io.refillData   := lineBuf(wordCnt)
+  val storeByteMask = Cat((0 until p.WMASK_BITS).reverse.map(i => Fill(8, storeWmask(i))))
+  val refillRawData = lineBuf(wordCnt)
+  val refillStoreData = (storeWdata & storeByteMask) | (refillRawData & ~storeByteMask)
+  io.refillData   := Mux(isStore && (wordCnt === storeWordOff), refillStoreData, refillRawData)
   io.refillTag    := missTag
   io.refillDone   := state === sDone
   io.refillIsStore := isStore
-  io.stall        := state =/= sIdle
+  io.stall        := state =/= sIdle && !isPrefetch
+  io.isIdle       := state === sIdle
 }
-````
+```
 
-## src\main\Dcache\DCacheTop.scala
+## src/main\Dcache\DCacheTop.scala
 
-``scala
+```scala
 package parameterized_cache
 
 import chisel3._
@@ -2075,13 +2156,32 @@ class DCacheTop(p: CacheParams) extends Module {
     // P0 fix: success signal propagated from halt MMIO write
     val success   = Output(Bool())
 
+    val pfReqValid = Input(Bool())
+    val pfReqReady = Output(Bool())
+    val pfReqAddr  = Input(UInt(p.ADDR_WIDTH.W))
+
     val mem = new MemBusIO(p)
   })
 
-  val addrTag  = io.addr(p.ADDR_WIDTH - 1, p.OFFSET_W + p.INDEX_W)
-  val addrIdx  = io.addr(p.OFFSET_W + p.INDEX_W - 1, p.OFFSET_W)
-  val addrWoff = io.addr(p.OFFSET_W - 1, 2)
-  val addrBoff = io.addr(1, 0)
+  require(p.ADDR_WIDTH >= 22, "DCacheTop expects at least 22-bit physical addresses")
+  private def toPhysAddr(addr: UInt): UInt = {
+    Cat(0.U((p.ADDR_WIDTH - 22).W), addr(21, 0))
+  }
+
+  // The simulation memory is addressed by low 22 bits.  Dhrystone uses both
+  // high reset-vector aliases (0x8002_xxxx via gp) and low absolute data
+  // addresses (0x0002_xxxx via lui), so cache lookup must use the same
+  // canonical physical address as the memory model.  MMIO checks below still
+  // use the original full address.
+  val cacheAddr = toPhysAddr(io.addr)
+  val pfCacheAddr = toPhysAddr(io.pfReqAddr)
+
+  val addrTag  = cacheAddr(p.ADDR_WIDTH - 1, p.OFFSET_W + p.INDEX_W)
+  val addrIdx  = cacheAddr(p.OFFSET_W + p.INDEX_W - 1, p.OFFSET_W)
+  val addrWoff = cacheAddr(p.OFFSET_W - 1, 2)
+  val addrBoff = cacheAddr(1, 0)
+  val pfTag    = pfCacheAddr(p.ADDR_WIDTH - 1, p.OFFSET_W + p.INDEX_W)
+  val pfIdx    = pfCacheAddr(p.OFFSET_W + p.INDEX_W - 1, p.OFFSET_W)
 
   // -------------------------------------------------------------------
   // Special / MMIO addresses
@@ -2102,6 +2202,10 @@ class DCacheTop(p: CacheParams) extends Module {
   // P0 fix: halt address is uncacheable
   val addrIsHalt    = io.addr === ADDR_HALT
   val isBypass      = addrIsPrintf || addrIsMtimeLo || addrIsMtimeHi || addrIsHalt
+  val pfIsBypass    = (io.pfReqAddr === ADDR_PRINTF) ||
+                      (io.pfReqAddr === ADDR_HALT) ||
+                      (io.pfReqAddr === ADDR_MTIME_LO) ||
+                      (io.pfReqAddr === ADDR_MTIME_HI)
 
   val isMtimeLo = addrIsMtimeLo && io.memRen
   val isMtimeHi = addrIsMtimeHi && io.memRen
@@ -2110,7 +2214,7 @@ class DCacheTop(p: CacheParams) extends Module {
   // while the assembly smoke tests write 1.
   val isHaltWrite = addrIsHalt && io.wen
   val successReg  = RegInit(false.B)
-  when(isHaltWrite && io.wdata =/= 0.U) { successReg := true.B }
+  when(isHaltWrite && (io.wdata =/= 0.U)) { successReg := true.B }
   io.success := successReg
 
   val tagArray  = Module(new TagArray(p))
@@ -2120,18 +2224,22 @@ class DCacheTop(p: CacheParams) extends Module {
   val loadExt   = Module(new LoadExtend(p))
   val missFsm   = Module(new DCacheMissFSM(p))
 
-  hitTest.io.tagData := tagArray.io.tagData
-  hitTest.io.tag     := addrTag
-  hitTest.io.memRen  := io.memRen
-  hitTest.io.wen     := io.wen
+  val demandReq = (io.memRen || io.wen) && !isBypass
+  val queryPrefetch = missFsm.io.isIdle && io.pfReqValid && !demandReq && !pfIsBypass
 
-  val isHit  = hitTest.io.isHit && !isBypass
+  hitTest.io.tagData := tagArray.io.tagData
+  hitTest.io.tag     := Mux(queryPrefetch, pfTag, addrTag)
+  hitTest.io.memRen  := Mux(queryPrefetch, true.B, io.memRen)
+  hitTest.io.wen     := Mux(queryPrefetch, false.B, io.wen)
+
+  val pfMiss = queryPrefetch && hitTest.io.missValid
+  val isHit  = hitTest.io.isHit && !isBypass && !queryPrefetch
   val hitWay = hitTest.io.hitWay
-  val cacheMiss = hitTest.io.missValid && !isBypass
+  val cacheMiss = hitTest.io.missValid && !isBypass && !queryPrefetch
 
   // TagArray
   tagArray.io.flush       := io.flush
-  tagArray.io.idx         := addrIdx
+  tagArray.io.idx         := Mux(queryPrefetch, pfIdx, addrIdx)
   tagArray.io.refillTagEn := missFsm.io.refillDone
   tagArray.io.refillWay   := missFsm.io.refillWay
   tagArray.io.refillIdx   := missFsm.io.refillIdx
@@ -2141,7 +2249,7 @@ class DCacheTop(p: CacheParams) extends Module {
   tagArray.io.setDirtyWay := hitWay
 
   // PLRU
-  plru.io.idx       := addrIdx
+  plru.io.idx       := Mux(queryPrefetch, pfIdx, addrIdx)
   plru.io.updateEn  := ((isHit && (io.memRen || io.wen)) || missFsm.io.refillDone) && !isBypass
   plru.io.updateWay := Mux(missFsm.io.refillDone, missFsm.io.refillWay, hitWay)
 
@@ -2157,7 +2265,7 @@ class DCacheTop(p: CacheParams) extends Module {
   dataArray.io.refillIdx    := missFsm.io.refillIdx
   dataArray.io.refillWord   := missFsm.io.refillWord
   dataArray.io.refillData   := missFsm.io.refillData
-  dataArray.io.evictIdx     := addrIdx
+  dataArray.io.evictIdx     := Mux(queryPrefetch, pfIdx, addrIdx)
   dataArray.io.evictWay     := plru.io.evictWay
 
   // LoadExt
@@ -2168,14 +2276,19 @@ class DCacheTop(p: CacheParams) extends Module {
   loadExt.io.rawData := dataArray.io.rawData
 
   // Miss FSM
-  missFsm.io.missValid   := cacheMiss
-  missFsm.io.missTag     := addrTag
-  missFsm.io.missIsStore := io.wen
-  missFsm.io.evictIdx    := addrIdx
+  missFsm.io.missValid   := cacheMiss || pfMiss
+  missFsm.io.missTag     := Mux(pfMiss, pfTag, addrTag)
+  missFsm.io.missIsStore := cacheMiss && io.wen
+  missFsm.io.missIsPrefetch := pfMiss
+  missFsm.io.missWordOff := addrWoff
+  missFsm.io.missWdata   := io.wdata
+  missFsm.io.missWmask   := io.wmask
+  missFsm.io.evictIdx    := Mux(pfMiss, pfIdx, addrIdx)
   missFsm.io.evictWay    := plru.io.evictWay
   missFsm.io.evictTag    := tagArray.io.tagData(plru.io.evictWay).tag
   missFsm.io.evictDirty  := tagArray.io.tagData(plru.io.evictWay).dirty
   missFsm.io.evictLine   := dataArray.io.evictLine
+  io.pfReqReady := missFsm.io.isIdle && !demandReq
 
   io.mem <> missFsm.io.mem
 
@@ -2193,11 +2306,11 @@ class DCacheTop(p: CacheParams) extends Module {
   io.missOut := topStall
   io.stall   := topStall
 }
-````
+```
 
-## src\main\Dcache\HitTest.scala
+## src/main\Dcache\HitTest.scala
 
-``scala
+```scala
 package parameterized_cache
 
 import chisel3._
@@ -2222,11 +2335,11 @@ class HitTest(p: CacheParams) extends Module {
   io.hitWay    := PriorityEncoder(hitVec)
   io.missValid := !io.isHit && (io.memRen || io.wen)
 }
-````
+```
 
-## src\main\Dcache\LoadExtend.scala
+## src/main\Dcache\LoadExtend.scala
 
-``scala
+```scala
 package parameterized_cache
 
 import chisel3._
@@ -2255,11 +2368,11 @@ class LoadExtend(p: CacheParams) extends Module {
     2.U -> (extByte ## byte)
   ))
 }
-````
+```
 
-## src\main\Dcache\MemBusIO.scala
+## src/main\Dcache\MemBusIO.scala
 
-``scala
+```scala
 package parameterized_cache
 
 import chisel3._
@@ -2283,11 +2396,11 @@ class MemBusIO(p: CacheParams) extends Bundle {
   val req  = Decoupled(new MemBusReq(p))
   val resp = Flipped(Decoupled(new MemBusResp(p)))
 }
-````
+```
 
-## src\main\Dcache\TagArray.scala
+## src/main\Dcache\TagArray.scala
 
-``scala
+```scala
 package parameterized_cache
 
 import chisel3._
@@ -2330,11 +2443,11 @@ class TagArray(p: CacheParams) extends Module {
     tagArray(io.idx)(io.setDirtyWay).dirty := true.B
   }
 }
-````
+```
 
-## src\main\Dcache\TreePLRU.scala
+## src/main\Dcache\TreePLRU.scala
 
-``scala
+```scala
 package parameterized_cache
 
 import chisel3._
@@ -2384,11 +2497,11 @@ class TreePLRU(p: CacheParams) extends Module {
     treeArray(io.idx) := newBits.asUInt
   }
 }
-````
+```
 
-## src\main\Decode\Decoder_c.scala
+## src/main\Decode\Decoder_c.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -2540,11 +2653,11 @@ class Decoder(enableRV32M: Boolean = false) extends Module {
   io.out.ctrl.kill    := false.B
   io.out.ctrl.allowIn := true.B
 }
-````
+```
 
-## src\main\Execute\ALU.scala
+## src/main\Execute\ALU.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -2630,11 +2743,11 @@ class ParamALU(val xlen: Int = 32, val enableRV32M: Boolean = false) extends Mod
 
   io.result := MuxLookup(io.aluOp, 0.U(xlen.W), baseAluMapping ++ rv32mMapping)
 }
-````
+```
 
-## src\main\frame.md
+## src/main\frame.md
 
-``md
+```md
 # 娴佹按绾挎鏋惰鏄?
 ## IF 妯″潡
 
@@ -3191,11 +3304,22 @@ EX 绾у簲鎶?`rs1Data` 浣滀负 `wdata`锛孋SRFile 杈撳嚭 `oldData`锛岄
 ### CSR 鍙屽彂闄愬埗
 
 鐢变簬褰撳墠 CSRFile 鍙湁涓€涓绔彛鍜屼竴涓啓璇锋眰绔彛锛屽熀纭€椤哄簭鏍稿簲鍦?ID 绾ч檺鍒跺悓鍛ㄦ湡鏈€澶氫竴鏉?CSR 鎸囦护杩涘叆 EX銆傝嫢妲?0 鍜屾Ы 1 閮芥槸 CSR 鎸囦护锛屽簲鍙彂灏勬Ы 0锛屾Ы 1 涓嬩竴鍛ㄦ湡閲嶆柊灏濊瘯銆?
-````
+## Prefetch Update
 
-## src\main\Frontend\BPU.scala
+Current prefetch control uses CSR `0x7C0`:
 
-``scala
+| Bit | Name | Scope |
+| --- | --- | --- |
+| `prefetchCtrl(0)` | `nextLinePrefetchEn` | Enables IF/I-Cache next-line prefetch. |
+| `prefetchCtrl(1)` | `stridePrefetchEn` | Enables IF/I-Cache and MEM/D-Cache stride prefetch. |
+| `prefetchCtrl(2)` | `streamPrefetchEn` | Enables IF/I-Cache and MEM/D-Cache stream prefetch. |
+
+D-Cache now exposes `pfReqValid`, `pfReqReady`, and `pfReqAddr`. Demand load/store miss has priority over prefetch. A D-Cache prefetch miss may occupy the memory refill FSM, but it must not directly freeze the pipeline unless a demand miss arrives while the FSM is busy.
+```
+
+## src/main\Frontend\BPU.scala
+
+```scala
 package riscv
 
 import chisel3._
@@ -3292,11 +3416,11 @@ class BPU extends Module {
     }
   }
 }
-````
+```
 
-## src\main\Frontend\BPU_RAS.scala
+## src/main\Frontend\BPU_RAS.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -3425,11 +3549,11 @@ class BPU_RAS extends Module {
     }
   }
 }
-````
+```
 
-## src\main\Frontend\NextLinePrefetcher.scala
+## src/main\Frontend\NextLinePrefetcher.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -3476,11 +3600,11 @@ class NextLinePrefetcher extends Module {
   io.pfReqAddr  := nextLineAddr
   // pfReqReady=0 鏃舵湰娆¤姹傝 ICacheMissFSM 闈欓粯涓㈠純锛坧fReqReady
   // 浠呭湪 FSM sIdle 涓旀棤 miss 鏃剁疆楂橈級锛涢鍙栧櫒鏈韩涓嶉渶瑕侀噸璇曢€昏緫銆?}
-````
+```
 
-## src\main\Frontend\PcGen.scala
+## src/main\Frontend\PcGen.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -3551,11 +3675,108 @@ class PcGen(
   io.currPc  := pcReg
   io.pcFetch := pcReg
 }
-````
+```
 
-## src\main\Frontend\TAGE.scala
+## src/main\Frontend\StrideStreamPrefetcher.scala
 
-``scala
+```scala
+package riscv
+
+import chisel3._
+import chisel3.util._
+
+class StridePrefetcher extends Module {
+  val io = IO(new Bundle {
+    val observeValid = Input(Bool())
+    val observeAddr  = Input(UInt(32.W))
+    val prefetchEn   = Input(Bool())
+
+    val pfReqValid = Output(Bool())
+    val pfReqReady = Input(Bool())
+    val pfReqAddr  = Output(UInt(32.W))
+  })
+
+  val lastValid = RegInit(false.B)
+  val lastLine  = RegInit(0.S(27.W))
+  val stride    = RegInit(0.S(27.W))
+  val conf      = RegInit(0.U(2.W))
+  val lastObs   = RegInit(0.U(32.W))
+
+  val currLine = io.observeAddr(31, 6).asSInt
+  val newObs = io.observeValid && (!lastValid || (io.observeAddr =/= lastObs))
+  val delta = currLine - lastLine
+  val strideHit = lastValid && (delta === stride) && (delta =/= 0.S(27.W))
+  val targetLine = currLine + stride
+  val targetBits = targetLine.asUInt
+  val targetAddr = Cat(targetBits(25, 0), 0.U(6.W))
+
+  io.pfReqValid := io.prefetchEn && newObs && strideHit && (conf >= 2.U)
+  io.pfReqAddr  := targetAddr
+
+  when(newObs) {
+    lastObs := io.observeAddr
+    when(strideHit) {
+      when(conf =/= 3.U) { conf := conf + 1.U }
+    }.otherwise {
+      stride := delta
+      conf := 0.U
+    }
+    lastLine := currLine
+    lastValid := true.B
+  }
+}
+
+class StreamPrefetcher extends Module {
+  val io = IO(new Bundle {
+    val observeValid = Input(Bool())
+    val observeAddr  = Input(UInt(32.W))
+    val prefetchEn   = Input(Bool())
+
+    val pfReqValid = Output(Bool())
+    val pfReqReady = Input(Bool())
+    val pfReqAddr  = Output(UInt(32.W))
+  })
+
+  val lastValid = RegInit(false.B)
+  val lastLine  = RegInit(0.S(27.W))
+  val direction = RegInit(1.S(2.W))
+  val conf      = RegInit(0.U(2.W))
+  val lastObs   = RegInit(0.U(32.W))
+
+  val currLine = io.observeAddr(31, 6).asSInt
+  val newObs = io.observeValid && (!lastValid || (io.observeAddr =/= lastObs))
+  val delta = currLine - lastLine
+  val streamStep = (delta === 1.S(27.W)) || (delta === -1.S(27.W))
+  val direction27 = Mux(direction === -1.S(2.W), -1.S(27.W), 1.S(27.W))
+  val sameDir = streamStep && (delta === direction27)
+  val nextDir = Mux(delta === -1.S(27.W), -1.S(2.W), 1.S(2.W))
+  val targetStep = Mux(direction === -1.S(2.W), -2.S(27.W), 2.S(27.W))
+  val targetLine = currLine + targetStep
+  val targetBits = targetLine.asUInt
+  val targetAddr = Cat(targetBits(25, 0), 0.U(6.W))
+
+  io.pfReqValid := io.prefetchEn && newObs && sameDir && (conf >= 1.U)
+  io.pfReqAddr  := targetAddr
+
+  when(newObs) {
+    lastObs := io.observeAddr
+    when(sameDir) {
+      when(conf =/= 3.U) { conf := conf + 1.U }
+    }.elsewhen(streamStep) {
+      direction := nextDir
+      conf := 0.U
+    }.otherwise {
+      conf := 0.U
+    }
+    lastLine := currLine
+    lastValid := true.B
+  }
+}
+```
+
+## src/main\Frontend\TAGE.scala
+
+```scala
 package riscv
 
 import chisel3._
@@ -3869,11 +4090,11 @@ class TAGE extends Module {
     rasPtr := (rasPtr - 1.U)(3, 0)
   }
 }
-````
+```
 
-## src\main\Icache\ICacheMissFSM.scala
+## src/main\Icache\ICacheMissFSM.scala
 
-``scala
+```scala
 package icache
 
 import chisel3._
@@ -4031,11 +4252,11 @@ class ICacheMissFSM(p: CacheParams) extends Module {
 
   // 棰勫彇鎻℃墜锛氫粎鍦?sIdle 涓旀棤 miss 鏃舵帴鍙?  io.pfReqReady := (state === sIdle) && !io.missValid
 }
-````
+```
 
-## src\main\Icache\ICacheParams.scala
+## src/main\Icache\ICacheParams.scala
 
-``scala
+```scala
 package icache
 
 import chisel3._
@@ -4049,11 +4270,11 @@ class ITagEntry(p: CacheParams) extends Bundle {
   val valid = Bool()
   val tag   = UInt(p.TAG_W.W)
 }
-````
+```
 
-## src\main\Icache\ICacheTop.scala
+## src/main\Icache\ICacheTop.scala
 
-``scala
+```scala
 package icache
 
 import chisel3._
@@ -4226,11 +4447,11 @@ object ICacheTop {
     LINE_BYTES = 64
   )
 }
-````
+```
 
-## src\main\Icache\IDataArray.scala
+## src/main\Icache\IDataArray.scala
 
-``scala
+```scala
 package icache
 
 import chisel3._
@@ -4271,11 +4492,11 @@ class IDataArray(p: CacheParams) extends Module {
     dArray(io.refillWay)(io.refillIdx)(io.refillWord) := io.refillData
   }
 }
-````
+```
 
-## src\main\Icache\IHitTest.scala
+## src/main\Icache\IHitTest.scala
 
-``scala
+```scala
 package icache
 
 import chisel3._
@@ -4308,11 +4529,11 @@ class IHitTest(p: CacheParams) extends Module {
   io.hitWay    := PriorityEncoder(hitVec)
   io.missValid := !io.isHit && io.reqValid
 }
-````
+```
 
-## src\main\Icache\InstSelect.scala
+## src/main\Icache\InstSelect.scala
 
-``scala
+```scala
 package icache
 
 import chisel3._
@@ -4343,11 +4564,11 @@ class InstSelect(p: CacheParams) extends Module {
   // 琛屽熬鍒ゆ柇锛歸ordsoff 涓烘渶鍚庝竴涓瓧鏃?slot1 瓒婄晫
   io.slot1Valid := io.wordsoff =/= (p.LINE_WORDS - 1).U
 }
-````
+```
 
-## src\main\Icache\ITagArray.scala
+## src/main\Icache\ITagArray.scala
 
-``scala
+```scala
 package icache
 
 import chisel3._
@@ -4392,11 +4613,11 @@ class ITagArray(p: CacheParams) extends Module {
     tArray(io.refillIdx)(io.refillWay).tag   := io.refillTag
   }
 }
-````
+```
 
-## src\main\Memory\mem.scala
+## src/main\Memory\mem.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
@@ -4476,19 +4697,23 @@ class RV32DualPortMemory(
     busy := false.B
   }
 }
-````
+```
 
-## src\main\Top.scala
+## src/main\Top.scala
 
-``scala
+```scala
 package riscv
 
 import chisel3._
 import chisel3.util._
 import parameterized_cache.{CacheParams, MemBusIO}
 
-class Top(enableRV32M: Boolean = false) extends Module {
-  private val p = CacheParams(32, 32, 8 * 1024, 4, 64)
+class Top(
+    enableRV32M: Boolean = false,
+    cacheParams: CacheParams = CacheParams.default,
+    dCacheParams: Option[CacheParams] = None) extends Module {
+  private val ip = cacheParams
+  private val dp = dCacheParams.getOrElse(cacheParams)
 
   val io = IO(new Bundle {
     val status = Output(Bool())
@@ -4498,8 +4723,8 @@ class Top(enableRV32M: Boolean = false) extends Module {
     val perf = Output(new CorePerfCounters)
   })
 
-  val core = Module(new InOrderCore(enableRV32M))
-  val memory = Module(new RV32DualPortMemory(p))
+  val core = Module(new InOrderCore(enableRV32M, ip, Some(dp)))
+  val memory = Module(new RV32DualPortMemory(ip))
 
   memory.io.imem <> core.io.imem
   memory.io.dmem <> core.io.dmem
@@ -4514,5 +4739,5 @@ class Top(enableRV32M: Boolean = false) extends Module {
 object Elaborate extends App {
   (new chisel3.stage.ChiselStage).emitVerilog(new Top)
 }
-````
+```
 

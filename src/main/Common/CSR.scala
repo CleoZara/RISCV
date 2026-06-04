@@ -16,7 +16,7 @@ object CSRAddr {
   val minstreth     = "hB82".U(12.W)
   val mcountinhibit = "h320".U(12.W)
   val misa          = "h301".U(12.W)
-  val prefetchCtrl  = "h7C0".U(12.W) // 自定义：bit0=Next-line, bit1=Stride
+  val prefetchCtrl  = "h7C0".U(12.W) // bit0=next-line, bit1=stride, bit2=stream
 }
 
 // CSROp 现统一定义在 Defines_c.scala（object CSROp），此处不再重复定义。
