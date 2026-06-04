@@ -1155,9 +1155,10 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
 
   // 鈹€鈹€ Slot-1 stall conditions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   // P2 fix: intra-slot RAW is resolved by the intra-EX bypass (F5) when
-  // slot 0 can forward.  Only truly block slot 1 when slot 0 is a Load.
+  // slot 0 can forward.  This also covers slot-1 load/store address and store
+  // data operands, because they are selected in EX before entering MEM.
   val slotRaw01 =
-    (!slot0CanBypass || slot1Mem) &&
+    !slot0CanBypass &&
     slotValid(0) && slotValid(1) &&
     dec(0).io.out.rfWen &&
     (dec(0).io.out.rdAddr =/= 0.U) &&
