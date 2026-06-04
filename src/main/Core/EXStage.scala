@@ -69,6 +69,12 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
 
     val fallThrough = io.in(i).pc + 4.U
     val isBranch    = io.in(i).brType =/= BrType.BR_NONE
+    val forwardData = MuxLookup(io.in(i).wbSel, alus(i).io.result, Seq(
+      WbSel.WB_ALU -> alus(i).io.result,
+      WbSel.WB_PC4 -> fallThrough,
+      WbSel.WB_CSR -> io.csrOldData,
+      WbSel.WB_MEM -> alus(i).io.result
+    ))
 
     actualNextPc(i) := MuxCase(fallThrough, Seq(
       io.in(i).isJalr          -> jalrTarget(i),
@@ -86,7 +92,7 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     io.exMemRen(i) := slotLive && io.in(i).memRen
     io.exRdAddr(i) := io.in(i).rdAddr
     io.exRfWen(i)  := slotLive && io.in(i).rfWen
-    io.exResult(i) := alus(i).io.result
+    io.exResult(i) := forwardData
 
     io.out(i) := 0.U.asTypeOf(new EXMEMBundle)
     io.out(i).pc        := io.in(i).pc

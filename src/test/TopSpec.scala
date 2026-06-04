@@ -64,7 +64,7 @@ class TopSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
           if (dut.io.success.peekBoolean()) success = true
           if (dut.io.printChar.valid.peekBoolean()) {
             val ch = dut.io.printChar.bits.peekInt().toChar
-            if (output.length < 4096) {
+            if (output.length < 65536) {
               output.append(ch)
               if (verbose) print(ch)
             } else if (!outputTruncated) {

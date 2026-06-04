@@ -64,9 +64,10 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   idStage.io.regRs2Data := regFile.io.rs2Data
   idStage.io.csrRdata   := csrFile.io.rdata
 
+  val wbRegWen = Wire(Vec(issueWidth, Bool()))
   regFile.io.rs1Addr := idStage.io.regRs1Addr
   regFile.io.rs2Addr := idStage.io.regRs2Addr
-  regFile.io.wen     := wbStage.io.regWen
+  regFile.io.wen     := wbRegWen
   regFile.io.waddr   := wbStage.io.regWaddr
   regFile.io.wdata   := wbStage.io.regWdata
 
@@ -88,6 +89,7 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   // retireEnable = true when pipeline is advancing OR it is the very first
   // cycle of a stall (the instruction that just "stopped" still retires once).
   val retireEnable = !hazard.io.stallWB || firstStallCycle
+  wbRegWen := VecInit(wbStage.io.regWen.map(_ && retireEnable))
   csrFile.io.instRetire := VecInit(wbStage.io.instRetire.map(_ && retireEnable))
 
   // ── Bypass Network ────────────────────────────────────────────────────
@@ -98,8 +100,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   bypass.io.exmemValid := VecInit(exmemReg.map(x => x.ctrl.valid && !x.ctrl.kill))
   bypass.io.memwb     := memwbReg
   bypass.io.memwbValid := VecInit(memwbReg.map(x => x.ctrl.valid && !x.ctrl.kill))
-  bypass.io.wbValid   := wbStage.io.wbValid
-  bypass.io.wbRfWen   := wbStage.io.wbRfWen
+  bypass.io.wbValid   := VecInit(wbStage.io.wbValid.map(_ && retireEnable))
+  bypass.io.wbRfWen   := wbRegWen
   bypass.io.wbRdAddr  := wbStage.io.wbRdAddr
   bypass.io.wbData    := wbStage.io.wbData
   bypass.io.rs1Use    := VecInit(idexReg.map(_.rs1Use))

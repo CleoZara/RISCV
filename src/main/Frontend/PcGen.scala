@@ -56,6 +56,9 @@ class PcGen(
   val pcReg  = RegInit(resetVec.U(32.W))
   val nextPc = Wire(UInt(32.W))
   val seqStep = Mux(io.fetchSlot1Valid, (N * 4).U(32.W), 4.U(32.W))
+  private def canonicalPc(pc: UInt): UInt = {
+    Mux(pc(31), pc, pc | resetVec.U(32.W))
+  }
 
   // ── 优先级仲裁（when 链，高优先级在前）────────────────────
   when(io.exRedirectValid) {
@@ -76,7 +79,7 @@ class PcGen(
     nextPc := pcReg + seqStep
   }
 
-  pcReg := nextPc
+  pcReg := canonicalPc(nextPc)
 
   io.currPc  := pcReg
   io.pcFetch := pcReg

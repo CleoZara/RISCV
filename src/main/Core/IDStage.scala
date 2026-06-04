@@ -65,6 +65,9 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   // ── P2 fix: slot 0 can forward its ALU result to slot 1 in the same EX
   // cycle (F5 bypass path) when it is a non-Load register-writing instruction.
   // In that case we must NOT block slot 1 on an intra-slot RAW.
+  val slot0Mem = slotValid(0) && (dec(0).io.out.memRen || dec(0).io.out.memWen)
+  val slot1Mem = slotValid(1) && (dec(1).io.out.memRen || dec(1).io.out.memWen)
+
   val slot0CanBypass =
     slotValid(0) &&
     dec(0).io.out.rfWen &&
@@ -76,15 +79,13 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   // P2 fix: intra-slot RAW is resolved by the intra-EX bypass (F5) when
   // slot 0 can forward.  Only truly block slot 1 when slot 0 is a Load.
   val slotRaw01 =
-    !slot0CanBypass &&
+    (!slot0CanBypass || slot1Mem) &&
     slotValid(0) && slotValid(1) &&
     dec(0).io.out.rfWen &&
     (dec(0).io.out.rdAddr =/= 0.U) &&
     ((dec(1).io.out.rs1Use && (dec(0).io.out.rdAddr === dec(1).io.out.rs1Addr)) ||
      (dec(1).io.out.rs2Use && (dec(0).io.out.rdAddr === dec(1).io.out.rs2Addr)))
 
-  val slot0Mem = slotValid(0) && (dec(0).io.out.memRen || dec(0).io.out.memWen)
-  val slot1Mem = slotValid(1) && (dec(1).io.out.memRen || dec(1).io.out.memWen)
   val slot0Csr = slotValid(0) && dec(0).io.out.csrOp =/= CSROp.NONE
   val slot1Csr = slotValid(1) && dec(1).io.out.csrOp =/= CSROp.NONE
   val slot1Ctrl = slotValid(1) &&
@@ -128,9 +129,8 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   io.csrRaddr := Mux(csrSel1, dec(1).io.out.csrAddr, dec(0).io.out.csrAddr)
 
   // ── JAL redirect (ID-level redirect, 1-cycle flush) ───────────────────
-  val jal0 = slotValid(0) && !io.flushId && dec(0).io.out.isJump && !dec(0).io.out.isJalr
-  val jal1 = slotValid(1) && !io.flushId && !slot1Blocked &&
-             dec(1).io.out.isJump && !dec(1).io.out.isJalr
+  val jal0 = canIssue0 && dec(0).io.out.isJump && !dec(0).io.out.isJalr
+  val jal1 = canIssue1 && dec(1).io.out.isJump && !dec(1).io.out.isJalr
   io.idRedirectValid := jal0 || jal1
   io.idRedirectPc    := Mux(jal0,
     dec(0).io.out.pc + dec(0).io.out.imm,

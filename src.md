@@ -1,6 +1,7 @@
 ﻿# src/main source snapshot
 
 ## src\main\Common\CSR.scala
+
 ```scala
 package riscv
 
@@ -8,9 +9,16 @@ import chisel3._
 import chisel3.util._
 
 object CSRAddr {
+  val cycle         = "hC00".U(12.W)
+  val time          = "hC01".U(12.W)
+  val instret       = "hC02".U(12.W)
+  val cycleh        = "hC80".U(12.W)
+  val timeh         = "hC81".U(12.W)
+  val instreth      = "hC82".U(12.W)
   val mcycle        = "hB00".U(12.W)
   val mcycleh       = "hB80".U(12.W)
   val minstret      = "hB02".U(12.W)
+  val minstreth     = "hB82".U(12.W)
   val mcountinhibit = "h320".U(12.W)
   val misa          = "h301".U(12.W)
   val prefetchCtrl  = "h7C0".U(12.W) // 鑷畾涔夛細bit0=Next-line, bit1=Stride
@@ -65,9 +73,16 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
 
   private def csrRead(addr: UInt): UInt = {
     MuxLookup(addr, 0.U(xlen.W), Seq(
+      CSRAddr.cycle         -> mcycle(31, 0),
+      CSRAddr.cycleh        -> mcycle(63, 32),
+      CSRAddr.time          -> mtime(31, 0),
+      CSRAddr.timeh         -> mtime(63, 32),
+      CSRAddr.instret       -> minstret(31, 0),
+      CSRAddr.instreth      -> minstret(63, 32),
       CSRAddr.mcycle        -> mcycle(31, 0),
       CSRAddr.mcycleh       -> mcycle(63, 32),
       CSRAddr.minstret      -> minstret(31, 0),
+      CSRAddr.minstreth     -> minstret(63, 32),
       CSRAddr.mcountinhibit -> mcountinhibit,
       CSRAddr.misa          -> misaVal,
       CSRAddr.prefetchCtrl  -> prefetchCtrl
@@ -95,6 +110,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
       is(CSRAddr.mcycle)        { mcycle := Cat(mcycle(63, 32), writeVal) }
       is(CSRAddr.mcycleh)       { mcycle := Cat(writeVal, mcycle(31, 0)) }
       is(CSRAddr.minstret)      { minstret := Cat(minstret(63, 32), writeVal) }
+      is(CSRAddr.minstreth)     { minstret := Cat(writeVal, minstret(31, 0)) }
       is(CSRAddr.mcountinhibit) { mcountinhibit := writeVal }
       is(CSRAddr.prefetchCtrl)  { prefetchCtrl := writeVal }
       // misa 鍙锛氬拷鐣ュ啓鍏?    }
@@ -110,6 +126,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
 ```
 
 ## src\main\Common\Defines_c.scala
+
 ```scala
 package riscv
 
@@ -345,6 +362,7 @@ class MEMWBBundle extends Bundle {
 ```
 
 ## src\main\Compat\ICacheMissFSMCompat.scala
+
 ```scala
 package icache
 
@@ -450,6 +468,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
 ```
 
 ## src\main\Core\BypassHazardUnit.scala
+
 ```scala
 package riscv
 
@@ -862,6 +881,7 @@ class BypassHazardUnit(
 ```
 
 ## src\main\Core\EXStage.scala
+
 ```scala
 package riscv
 
@@ -934,6 +954,12 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
 
     val fallThrough = io.in(i).pc + 4.U
     val isBranch    = io.in(i).brType =/= BrType.BR_NONE
+    val forwardData = MuxLookup(io.in(i).wbSel, alus(i).io.result, Seq(
+      WbSel.WB_ALU -> alus(i).io.result,
+      WbSel.WB_PC4 -> fallThrough,
+      WbSel.WB_CSR -> io.csrOldData,
+      WbSel.WB_MEM -> alus(i).io.result
+    ))
 
     actualNextPc(i) := MuxCase(fallThrough, Seq(
       io.in(i).isJalr          -> jalrTarget(i),
@@ -951,7 +977,7 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     io.exMemRen(i) := slotLive && io.in(i).memRen
     io.exRdAddr(i) := io.in(i).rdAddr
     io.exRfWen(i)  := slotLive && io.in(i).rfWen
-    io.exResult(i) := alus(i).io.result
+    io.exResult(i) := forwardData
 
     io.out(i) := 0.U.asTypeOf(new EXMEMBundle)
     io.out(i).pc        := io.in(i).pc
@@ -1023,6 +1049,7 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
 ```
 
 ## src\main\Core\IDStage.scala
+
 ```scala
 package riscv
 
@@ -1091,6 +1118,9 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   // 鈹€鈹€ P2 fix: slot 0 can forward its ALU result to slot 1 in the same EX
   // cycle (F5 bypass path) when it is a non-Load register-writing instruction.
   // In that case we must NOT block slot 1 on an intra-slot RAW.
+  val slot0Mem = slotValid(0) && (dec(0).io.out.memRen || dec(0).io.out.memWen)
+  val slot1Mem = slotValid(1) && (dec(1).io.out.memRen || dec(1).io.out.memWen)
+
   val slot0CanBypass =
     slotValid(0) &&
     dec(0).io.out.rfWen &&
@@ -1102,15 +1132,13 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   // P2 fix: intra-slot RAW is resolved by the intra-EX bypass (F5) when
   // slot 0 can forward.  Only truly block slot 1 when slot 0 is a Load.
   val slotRaw01 =
-    !slot0CanBypass &&
+    (!slot0CanBypass || slot1Mem) &&
     slotValid(0) && slotValid(1) &&
     dec(0).io.out.rfWen &&
     (dec(0).io.out.rdAddr =/= 0.U) &&
     ((dec(1).io.out.rs1Use && (dec(0).io.out.rdAddr === dec(1).io.out.rs1Addr)) ||
      (dec(1).io.out.rs2Use && (dec(0).io.out.rdAddr === dec(1).io.out.rs2Addr)))
 
-  val slot0Mem = slotValid(0) && (dec(0).io.out.memRen || dec(0).io.out.memWen)
-  val slot1Mem = slotValid(1) && (dec(1).io.out.memRen || dec(1).io.out.memWen)
   val slot0Csr = slotValid(0) && dec(0).io.out.csrOp =/= CSROp.NONE
   val slot1Csr = slotValid(1) && dec(1).io.out.csrOp =/= CSROp.NONE
   val slot1Ctrl = slotValid(1) &&
@@ -1154,9 +1182,8 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   io.csrRaddr := Mux(csrSel1, dec(1).io.out.csrAddr, dec(0).io.out.csrAddr)
 
   // 鈹€鈹€ JAL redirect (ID-level redirect, 1-cycle flush) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-  val jal0 = slotValid(0) && !io.flushId && dec(0).io.out.isJump && !dec(0).io.out.isJalr
-  val jal1 = slotValid(1) && !io.flushId && !slot1Blocked &&
-             dec(1).io.out.isJump && !dec(1).io.out.isJalr
+  val jal0 = canIssue0 && dec(0).io.out.isJump && !dec(0).io.out.isJalr
+  val jal1 = canIssue1 && dec(1).io.out.isJump && !dec(1).io.out.isJalr
   io.idRedirectValid := jal0 || jal1
   io.idRedirectPc    := Mux(jal0,
     dec(0).io.out.pc + dec(0).io.out.imm,
@@ -1220,6 +1247,7 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
 ```
 
 ## src\main\Core\IFStage.scala
+
 ```scala
 package riscv
 
@@ -1309,6 +1337,7 @@ class IFStage extends Module {
 ```
 
 ## src\main\Core\InOrderCore.scala
+
 ```scala
 package riscv
 
@@ -1376,9 +1405,10 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   idStage.io.regRs2Data := regFile.io.rs2Data
   idStage.io.csrRdata   := csrFile.io.rdata
 
+  val wbRegWen = Wire(Vec(issueWidth, Bool()))
   regFile.io.rs1Addr := idStage.io.regRs1Addr
   regFile.io.rs2Addr := idStage.io.regRs2Addr
-  regFile.io.wen     := wbStage.io.regWen
+  regFile.io.wen     := wbRegWen
   regFile.io.waddr   := wbStage.io.regWaddr
   regFile.io.wdata   := wbStage.io.regWdata
 
@@ -1400,6 +1430,7 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   // retireEnable = true when pipeline is advancing OR it is the very first
   // cycle of a stall (the instruction that just "stopped" still retires once).
   val retireEnable = !hazard.io.stallWB || firstStallCycle
+  wbRegWen := VecInit(wbStage.io.regWen.map(_ && retireEnable))
   csrFile.io.instRetire := VecInit(wbStage.io.instRetire.map(_ && retireEnable))
 
   // 鈹€鈹€ Bypass Network 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
@@ -1410,8 +1441,8 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
   bypass.io.exmemValid := VecInit(exmemReg.map(x => x.ctrl.valid && !x.ctrl.kill))
   bypass.io.memwb     := memwbReg
   bypass.io.memwbValid := VecInit(memwbReg.map(x => x.ctrl.valid && !x.ctrl.kill))
-  bypass.io.wbValid   := wbStage.io.wbValid
-  bypass.io.wbRfWen   := wbStage.io.wbRfWen
+  bypass.io.wbValid   := VecInit(wbStage.io.wbValid.map(_ && retireEnable))
+  bypass.io.wbRfWen   := wbRegWen
   bypass.io.wbRdAddr  := wbStage.io.wbRdAddr
   bypass.io.wbData    := wbStage.io.wbData
   bypass.io.rs1Use    := VecInit(idexReg.map(_.rs1Use))
@@ -1488,6 +1519,7 @@ class InOrderCore(enableRV32M: Boolean = false) extends Module {
 ```
 
 ## src\main\Core\MEMStage.scala
+
 ```scala
 package riscv
 
@@ -1604,6 +1636,7 @@ class MEMStage extends Module {
 ```
 
 ## src\main\Core\RegFile.scala
+
 ```scala
 package riscv
 
@@ -1648,6 +1681,7 @@ class RegFile(issueWidth: Int = 2) extends Module {
 ```
 
 ## src\main\Core\WBStage.scala
+
 ```scala
 package riscv
 
@@ -1695,6 +1729,7 @@ class WBStage extends Module {
 ```
 
 ## src\main\Dcache\CacheParams.scala
+
 ```scala
 package parameterized_cache
 
@@ -1733,6 +1768,7 @@ class TagEntry(p: CacheParams) extends Bundle {
 ```
 
 ## src\main\Dcache\DataArray.scala
+
 ```scala
 package parameterized_cache
 
@@ -1781,6 +1817,7 @@ class DataArray(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\DCacheMissFSM.scala
+
 ```scala
 package parameterized_cache
 
@@ -1879,6 +1916,7 @@ class DCacheMissFSM(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\DCacheTop.scala
+
 ```scala
 package parameterized_cache
 
@@ -1938,10 +1976,11 @@ class DCacheTop(p: CacheParams) extends Module {
   val isMtimeLo = addrIsMtimeLo && io.memRen
   val isMtimeHi = addrIsMtimeHi && io.memRen
 
-  // P0 fix: latch success when a store word/byte to ADDR_HALT arrives with wdata[0]=1
+  // Latch success on any non-zero store to ADDR_HALT. Dhrystone writes 2,
+  // while the assembly smoke tests write 1.
   val isHaltWrite = addrIsHalt && io.wen
   val successReg  = RegInit(false.B)
-  when(isHaltWrite && io.wdata(0)) { successReg := true.B }
+  when(isHaltWrite && io.wdata =/= 0.U) { successReg := true.B }
   io.success := successReg
 
   val tagArray  = Module(new TagArray(p))
@@ -2027,6 +2066,7 @@ class DCacheTop(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\HitTest.scala
+
 ```scala
 package parameterized_cache
 
@@ -2055,6 +2095,7 @@ class HitTest(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\LoadExtend.scala
+
 ```scala
 package parameterized_cache
 
@@ -2087,6 +2128,7 @@ class LoadExtend(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\MemBusIO.scala
+
 ```scala
 package parameterized_cache
 
@@ -2111,6 +2153,7 @@ class MemBusIO(p: CacheParams) extends Bundle {
 ```
 
 ## src\main\Dcache\TagArray.scala
+
 ```scala
 package parameterized_cache
 
@@ -2157,6 +2200,7 @@ class TagArray(p: CacheParams) extends Module {
 ```
 
 ## src\main\Dcache\TreePLRU.scala
+
 ```scala
 package parameterized_cache
 
@@ -2210,6 +2254,7 @@ class TreePLRU(p: CacheParams) extends Module {
 ```
 
 ## src\main\Decode\Decoder_c.scala
+
 ```scala
 package riscv
 
@@ -2365,6 +2410,7 @@ class Decoder(enableRV32M: Boolean = false) extends Module {
 ```
 
 ## src\main\Execute\ALU.scala
+
 ```scala
 package riscv
 
@@ -2454,6 +2500,7 @@ class ParamALU(val xlen: Int = 32, val enableRV32M: Boolean = false) extends Mod
 ```
 
 ## src\main\frame.md
+
 ```scala
 # 娴佹按绾挎鏋惰鏄?
 ## IF 妯″潡
@@ -3014,6 +3061,7 @@ EX 绾у簲鎶?`rs1Data` 浣滀负 `wdata`锛孋SRFile 杈撳嚭 `oldData`锛岄
 ```
 
 ## src\main\Frontend\BPU.scala
+
 ```scala
 package riscv
 
@@ -3114,6 +3162,7 @@ class BPU extends Module {
 ```
 
 ## src\main\Frontend\BPU_RAS.scala
+
 ```scala
 package riscv
 
@@ -3236,6 +3285,7 @@ class BPU_RAS extends Module {
 ```
 
 ## src\main\Frontend\NextLinePrefetcher.scala
+
 ```scala
 package riscv
 
@@ -3286,6 +3336,7 @@ class NextLinePrefetcher extends Module {
 ```
 
 ## src\main\Frontend\PcGen.scala
+
 ```scala
 package riscv
 
@@ -3334,6 +3385,9 @@ class PcGen(
   val pcReg  = RegInit(resetVec.U(32.W))
   val nextPc = Wire(UInt(32.W))
   val seqStep = Mux(io.fetchSlot1Valid, (N * 4).U(32.W), 4.U(32.W))
+  private def canonicalPc(pc: UInt): UInt = {
+    Mux(pc(31), pc, pc | resetVec.U(32.W))
+  }
 
   // 鈹€鈹€ 浼樺厛绾т徊瑁侊紙when 閾撅紝楂樹紭鍏堢骇鍦ㄥ墠锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   when(io.exRedirectValid) {
@@ -3349,7 +3403,7 @@ class PcGen(
     // 榛樿锛氶『搴忓彇鎸囥€傝嫢 PC 浠?4B 瀵归綈锛屽綋鍓嶅寘鍙兘鏈夋晥杩斿洖 slot0锛?    // 涓嬩竴鎷嶅繀椤?PC+4锛屼笉鑳芥寜鍙屽彂瀹藉害璺宠繃 slot1 浣嶇疆鐨勬寚浠ゃ€?    nextPc := pcReg + seqStep
   }
 
-  pcReg := nextPc
+  pcReg := canonicalPc(nextPc)
 
   io.currPc  := pcReg
   io.pcFetch := pcReg
@@ -3357,6 +3411,7 @@ class PcGen(
 ```
 
 ## src\main\Frontend\TAGE.scala
+
 ```scala
 package riscv
 
@@ -3674,6 +3729,7 @@ class TAGE extends Module {
 ```
 
 ## src\main\Icache\ICacheMissFSM.scala
+
 ```scala
 package icache
 
@@ -3829,6 +3885,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
 ```
 
 ## src\main\Icache\ICacheParams.scala
+
 ```scala
 package icache
 
@@ -3846,6 +3903,7 @@ class ITagEntry(p: CacheParams) extends Bundle {
 ```
 
 ## src\main\Icache\ICacheTop.scala
+
 ```scala
 package icache
 
@@ -4022,6 +4080,7 @@ object ICacheTop {
 ```
 
 ## src\main\Icache\IDataArray.scala
+
 ```scala
 package icache
 
@@ -4066,6 +4125,7 @@ class IDataArray(p: CacheParams) extends Module {
 ```
 
 ## src\main\Icache\IHitTest.scala
+
 ```scala
 package icache
 
@@ -4102,6 +4162,7 @@ class IHitTest(p: CacheParams) extends Module {
 ```
 
 ## src\main\Icache\InstSelect.scala
+
 ```scala
 package icache
 
@@ -4136,6 +4197,7 @@ class InstSelect(p: CacheParams) extends Module {
 ```
 
 ## src\main\Icache\ITagArray.scala
+
 ```scala
 package icache
 
@@ -4184,6 +4246,7 @@ class ITagArray(p: CacheParams) extends Module {
 ```
 
 ## src\main\Memory\mem.scala
+
 ```scala
 package riscv
 
@@ -4253,6 +4316,7 @@ class RV32DualPortMemory(
 ```
 
 ## src\main\Top.scala
+
 ```scala
 package riscv
 

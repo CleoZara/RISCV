@@ -56,10 +56,11 @@ class DCacheTop(p: CacheParams) extends Module {
   val isMtimeLo = addrIsMtimeLo && io.memRen
   val isMtimeHi = addrIsMtimeHi && io.memRen
 
-  // P0 fix: latch success when a store word/byte to ADDR_HALT arrives with wdata[0]=1
+  // Latch success on any non-zero store to ADDR_HALT. Dhrystone writes 2,
+  // while the assembly smoke tests write 1.
   val isHaltWrite = addrIsHalt && io.wen
   val successReg  = RegInit(false.B)
-  when(isHaltWrite && io.wdata(0)) { successReg := true.B }
+  when(isHaltWrite && io.wdata =/= 0.U) { successReg := true.B }
   io.success := successReg
 
   val tagArray  = Module(new TagArray(p))

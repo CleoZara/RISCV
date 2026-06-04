@@ -4,9 +4,16 @@ import chisel3._
 import chisel3.util._
 
 object CSRAddr {
+  val cycle         = "hC00".U(12.W)
+  val time          = "hC01".U(12.W)
+  val instret       = "hC02".U(12.W)
+  val cycleh        = "hC80".U(12.W)
+  val timeh         = "hC81".U(12.W)
+  val instreth      = "hC82".U(12.W)
   val mcycle        = "hB00".U(12.W)
   val mcycleh       = "hB80".U(12.W)
   val minstret      = "hB02".U(12.W)
+  val minstreth     = "hB82".U(12.W)
   val mcountinhibit = "h320".U(12.W)
   val misa          = "h301".U(12.W)
   val prefetchCtrl  = "h7C0".U(12.W) // 自定义：bit0=Next-line, bit1=Stride
@@ -66,9 +73,16 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
 
   private def csrRead(addr: UInt): UInt = {
     MuxLookup(addr, 0.U(xlen.W), Seq(
+      CSRAddr.cycle         -> mcycle(31, 0),
+      CSRAddr.cycleh        -> mcycle(63, 32),
+      CSRAddr.time          -> mtime(31, 0),
+      CSRAddr.timeh         -> mtime(63, 32),
+      CSRAddr.instret       -> minstret(31, 0),
+      CSRAddr.instreth      -> minstret(63, 32),
       CSRAddr.mcycle        -> mcycle(31, 0),
       CSRAddr.mcycleh       -> mcycle(63, 32),
       CSRAddr.minstret      -> minstret(31, 0),
+      CSRAddr.minstreth     -> minstret(63, 32),
       CSRAddr.mcountinhibit -> mcountinhibit,
       CSRAddr.misa          -> misaVal,
       CSRAddr.prefetchCtrl  -> prefetchCtrl
@@ -96,6 +110,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
       is(CSRAddr.mcycle)        { mcycle := Cat(mcycle(63, 32), writeVal) }
       is(CSRAddr.mcycleh)       { mcycle := Cat(writeVal, mcycle(31, 0)) }
       is(CSRAddr.minstret)      { minstret := Cat(minstret(63, 32), writeVal) }
+      is(CSRAddr.minstreth)     { minstret := Cat(writeVal, minstret(31, 0)) }
       is(CSRAddr.mcountinhibit) { mcountinhibit := writeVal }
       is(CSRAddr.prefetchCtrl)  { prefetchCtrl := writeVal }
       // misa 只读：忽略写入
