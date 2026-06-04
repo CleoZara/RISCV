@@ -129,12 +129,20 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   io.csrRaddr := Mux(csrSel1, dec(1).io.out.csrAddr, dec(0).io.out.csrAddr)
 
   // ── JAL redirect (ID-level redirect, 1-cycle flush) ───────────────────
-  val jal0 = canIssue0 && dec(0).io.out.isJump && !dec(0).io.out.isJalr
-  val jal1 = canIssue1 && dec(1).io.out.isJump && !dec(1).io.out.isJalr
+  val jalTarget0 = dec(0).io.out.pc + dec(0).io.out.imm
+  val jalTarget1 = dec(1).io.out.pc + dec(1).io.out.imm
+  val jal0 = canIssue0 &&
+             dec(0).io.out.isJump &&
+             !dec(0).io.out.isJalr &&
+             eff(0).predNextPc =/= jalTarget0
+  val jal1 = canIssue1 &&
+             dec(1).io.out.isJump &&
+             !dec(1).io.out.isJalr &&
+             eff(1).predNextPc =/= jalTarget1
   io.idRedirectValid := jal0 || jal1
   io.idRedirectPc    := Mux(jal0,
-    dec(0).io.out.pc + dec(0).io.out.imm,
-    dec(1).io.out.pc + dec(1).io.out.imm)
+    jalTarget0,
+    jalTarget1)
 
   // ── Pipeline register outputs ─────────────────────────────────────────
   for (i <- 0 until issueWidth) {

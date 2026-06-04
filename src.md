@@ -1182,12 +1182,20 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
   io.csrRaddr := Mux(csrSel1, dec(1).io.out.csrAddr, dec(0).io.out.csrAddr)
 
   // 鈹€鈹€ JAL redirect (ID-level redirect, 1-cycle flush) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-  val jal0 = canIssue0 && dec(0).io.out.isJump && !dec(0).io.out.isJalr
-  val jal1 = canIssue1 && dec(1).io.out.isJump && !dec(1).io.out.isJalr
+  val jalTarget0 = dec(0).io.out.pc + dec(0).io.out.imm
+  val jalTarget1 = dec(1).io.out.pc + dec(1).io.out.imm
+  val jal0 = canIssue0 &&
+             dec(0).io.out.isJump &&
+             !dec(0).io.out.isJalr &&
+             eff(0).predNextPc =/= jalTarget0
+  val jal1 = canIssue1 &&
+             dec(1).io.out.isJump &&
+             !dec(1).io.out.isJalr &&
+             eff(1).predNextPc =/= jalTarget1
   io.idRedirectValid := jal0 || jal1
   io.idRedirectPc    := Mux(jal0,
-    dec(0).io.out.pc + dec(0).io.out.imm,
-    dec(1).io.out.pc + dec(1).io.out.imm)
+    jalTarget0,
+    jalTarget1)
 
   // 鈹€鈹€ Pipeline register outputs 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   for (i <- 0 until issueWidth) {
@@ -1285,12 +1293,27 @@ class IFStage extends Module {
   val icache = Module(new ICacheTop(p))
   val prefetcher = Module(new NextLinePrefetcher)
 
+  private def isJal(inst: UInt): Bool = inst(6, 0) === "b1101111".U
+  private def jalImm(inst: UInt): UInt = {
+    Cat(Fill(11, inst(31)), inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
+  }
+
+  val slotPc0 = pcGen.io.pcFetch
+  val slotPc1 = pcGen.io.pcFetch + 4.U
+  val slot0Jal = icache.io.instValids(0) && isJal(icache.io.insts(0))
+  val slot1Jal = icache.io.instValids(1) && isJal(icache.io.insts(1))
+  val slot0JalTarget = slotPc0 + jalImm(icache.io.insts(0))
+  val slot1JalTarget = slotPc1 + jalImm(icache.io.insts(1))
+  val ifPredTaken = slot0Jal || io.bpuPredTaken || slot1Jal
+  val ifPredTarget = Mux(slot0Jal, slot0JalTarget,
+    Mux(io.bpuPredTaken, io.bpuPredTarget, slot1JalTarget))
+
   pcGen.io.exRedirectValid := io.exRedirectValid
   pcGen.io.exRedirectPc    := io.exRedirectPc
   pcGen.io.idRedirectValid := io.idRedirectValid
   pcGen.io.idRedirectPc    := io.idRedirectPc
-  pcGen.io.bpuPredTaken    := io.bpuPredTaken
-  pcGen.io.bpuPredTarget   := io.bpuPredTarget
+  pcGen.io.bpuPredTaken    := ifPredTaken
+  pcGen.io.bpuPredTarget   := ifPredTarget
   pcGen.io.stallIf         := io.stallIf
   pcGen.io.fetchSlot1Valid := icache.io.instValids(1)
 
@@ -1315,15 +1338,18 @@ class IFStage extends Module {
   val seqNextPc = pcGen.io.pcFetch + seqStep
   for (i <- 0 until issueWidth) {
     val slotPc = pcGen.io.pcFetch + (i * 4).U
-    val slotPredNextPc = Mux(io.bpuPredTaken, io.bpuPredTarget, slotPc + 4.U)
+    val slotJal = if (i == 0) slot0Jal else slot1Jal
+    val slotJalTarget = if (i == 0) slot0JalTarget else slot1JalTarget
+    val slotPredNextPc = Mux(slotJal, slotJalTarget,
+      Mux(io.bpuPredTaken, io.bpuPredTarget, slotPc + 4.U))
 
     io.out(i) := 0.U.asTypeOf(new IFIDSlot)
     io.out(i).pc := slotPc
     io.out(i).inst := icache.io.insts(i)
     io.out(i).slotIdx := i.U
     io.out(i).fetchPc := pcGen.io.pcFetch
-    io.out(i).predTaken := io.bpuPredTaken
-    io.out(i).predTarget := io.bpuPredTarget
+    io.out(i).predTaken := slotJal || io.bpuPredTaken
+    io.out(i).predTarget := Mux(slotJal, slotJalTarget, io.bpuPredTarget)
     io.out(i).predNextPc := slotPredNextPc
     io.out(i).seqNextPc := seqNextPc
     io.out(i).icacheHit := icache.io.respValid
