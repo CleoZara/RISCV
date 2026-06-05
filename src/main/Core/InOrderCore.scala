@@ -162,6 +162,7 @@ class InOrderCore(
   memStage.io.mtimeLo    := csrFile.io.mtimeLo
   memStage.io.mtimeHi    := csrFile.io.mtimeHi
   memStage.io.dcacheFlush := false.B
+  memStage.io.nextLinePrefetchEn := csrFile.io.prefetchCtrl(0)
   memStage.io.stridePrefetchEn := csrFile.io.prefetchCtrl(1)
   memStage.io.streamPrefetchEn := csrFile.io.prefetchCtrl(2)
 

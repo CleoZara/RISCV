@@ -1,6 +1,6 @@
-# src/main source snapshot
+﻿# src/main source snapshot
 
-## src/main\Common\CSR.scala
+## src\main\Common\CSR.scala
 
 ```scala
 package riscv
@@ -136,7 +136,7 @@ class CSRFile(
 }
 ```
 
-## src/main\Common\Defines_c.scala
+## src\main\Common\Defines_c.scala
 
 ```scala
 package riscv
@@ -387,7 +387,7 @@ class CorePerfCounters extends Bundle {
 }
 ```
 
-## src/main\Compat\ICacheMissFSMCompat.scala
+## src\main\Compat\ICacheMissFSMCompat.scala
 
 ```scala
 package icache
@@ -500,7 +500,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Core\BypassHazardUnit.scala
+## src\main\Core\BypassHazardUnit.scala
 
 ```scala
 package riscv
@@ -913,7 +913,7 @@ class BypassHazardUnit(
 }
 ```
 
-## src/main\Core\EXStage.scala
+## src\main\Core\EXStage.scala
 
 ```scala
 package riscv
@@ -1081,7 +1081,7 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
 }
 ```
 
-## src/main\Core\IDStage.scala
+## src\main\Core\IDStage.scala
 
 ```scala
 package riscv
@@ -1303,7 +1303,7 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
 }
 ```
 
-## src/main\Core\IFStage.scala
+## src\main\Core\IFStage.scala
 
 ```scala
 package riscv
@@ -1444,7 +1444,7 @@ class IFStage(p: CacheParams = CacheParams.default) extends Module {
 }
 ```
 
-## src/main\Core\InOrderCore.scala
+## src\main\Core\InOrderCore.scala
 
 ```scala
 package riscv
@@ -1611,6 +1611,7 @@ class InOrderCore(
   memStage.io.mtimeLo    := csrFile.io.mtimeLo
   memStage.io.mtimeHi    := csrFile.io.mtimeHi
   memStage.io.dcacheFlush := false.B
+  memStage.io.nextLinePrefetchEn := csrFile.io.prefetchCtrl(0)
   memStage.io.stridePrefetchEn := csrFile.io.prefetchCtrl(1)
   memStage.io.streamPrefetchEn := csrFile.io.prefetchCtrl(2)
 
@@ -1706,7 +1707,7 @@ class InOrderCore(
 }
 ```
 
-## src/main\Core\MEMStage.scala
+## src\main\Core\MEMStage.scala
 
 ```scala
 package riscv
@@ -1725,6 +1726,7 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
     val mtimeLo = Input(UInt(32.W))
     val mtimeHi = Input(UInt(32.W))
     val dcacheFlush = Input(Bool())
+    val nextLinePrefetchEn = Input(Bool())
     val stridePrefetchEn = Input(Bool())
     val streamPrefetchEn = Input(Bool())
     val dcacheStall = Output(Bool())
@@ -1797,10 +1799,35 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
 
   val pfSelStream = streamPrefetcher.io.pfReqValid
   val pfSelStride = !pfSelStream && stridePrefetcher.io.pfReqValid
-  dcache.io.pfReqValid := pfSelStream || pfSelStride
-  dcache.io.pfReqAddr  := Mux(pfSelStream, streamPrefetcher.io.pfReqAddr, stridePrefetcher.io.pfReqAddr)
-  streamPrefetcher.io.pfReqReady := dcache.io.pfReqReady && pfSelStream
-  stridePrefetcher.io.pfReqReady := dcache.io.pfReqReady && pfSelStride
+  val nextLinePfValid = io.nextLinePrefetchEn && pfObserve
+  val nextLinePfAddr  = Cat(memAddr(31, 6) + 1.U, 0.U(6.W))
+  val rawPfValid = pfSelStream || pfSelStride || nextLinePfValid
+  val rawPfAddr = Mux(pfSelStream, streamPrefetcher.io.pfReqAddr,
+    Mux(pfSelStride, stridePrefetcher.io.pfReqAddr, nextLinePfAddr))
+
+  val pfPendingValid = RegInit(false.B)
+  val pfPendingAddr  = RegInit(0.U(32.W))
+  val pfIssueValid   = pfPendingValid || rawPfValid
+  val pfIssueAddr    = Mux(pfPendingValid, pfPendingAddr, rawPfAddr)
+
+  dcache.io.pfReqValid := pfIssueValid
+  dcache.io.pfReqAddr  := pfIssueAddr
+
+  val pfAccepted = pfIssueValid && dcache.io.pfReqReady
+  when(io.flushMem) {
+    pfPendingValid := false.B
+  }.elsewhen(pfPendingValid) {
+    when(pfAccepted) {
+      pfPendingValid := false.B
+    }
+  }.elsewhen(rawPfValid && !pfAccepted) {
+    pfPendingValid := true.B
+    pfPendingAddr  := rawPfAddr
+  }
+
+  val rawPfCanAccept = !pfPendingValid && dcache.io.pfReqReady
+  streamPrefetcher.io.pfReqReady := rawPfCanAccept && pfSelStream
+  stridePrefetcher.io.pfReqReady := rawPfCanAccept && pfSelStride
 
   val printPc   = io.in(memIdx).pc
   val printBits = io.in(memIdx).rs2Data(7, 0)
@@ -1847,7 +1874,7 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
 }
 ```
 
-## src/main\Core\RegFile.scala
+## src\main\Core\RegFile.scala
 
 ```scala
 package riscv
@@ -1892,7 +1919,7 @@ class RegFile(issueWidth: Int = 2) extends Module {
 }
 ```
 
-## src/main\Core\WBStage.scala
+## src\main\Core\WBStage.scala
 
 ```scala
 package riscv
@@ -1940,7 +1967,7 @@ class WBStage extends Module {
 }
 ```
 
-## src/main\Dcache\CacheParams.scala
+## src\main\Dcache\CacheParams.scala
 
 ```scala
 package parameterized_cache
@@ -1989,7 +2016,7 @@ object CacheParams {
 }
 ```
 
-## src/main\Dcache\DataArray.scala
+## src\main\Dcache\DataArray.scala
 
 ```scala
 package parameterized_cache
@@ -2038,7 +2065,7 @@ class DataArray(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Dcache\DCacheMissFSM.scala
+## src\main\Dcache\DCacheMissFSM.scala
 
 ```scala
 package parameterized_cache
@@ -2160,7 +2187,7 @@ class DCacheMissFSM(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Dcache\DCacheTop.scala
+## src\main\Dcache\DCacheTop.scala
 
 ```scala
 package parameterized_cache
@@ -2342,7 +2369,7 @@ class DCacheTop(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Dcache\HitTest.scala
+## src\main\Dcache\HitTest.scala
 
 ```scala
 package parameterized_cache
@@ -2371,7 +2398,7 @@ class HitTest(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Dcache\LoadExtend.scala
+## src\main\Dcache\LoadExtend.scala
 
 ```scala
 package parameterized_cache
@@ -2404,7 +2431,7 @@ class LoadExtend(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Dcache\MemBusIO.scala
+## src\main\Dcache\MemBusIO.scala
 
 ```scala
 package parameterized_cache
@@ -2432,7 +2459,7 @@ class MemBusIO(p: CacheParams) extends Bundle {
 }
 ```
 
-## src/main\Dcache\TagArray.scala
+## src\main\Dcache\TagArray.scala
 
 ```scala
 package parameterized_cache
@@ -2479,7 +2506,7 @@ class TagArray(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Dcache\TreePLRU.scala
+## src\main\Dcache\TreePLRU.scala
 
 ```scala
 package parameterized_cache
@@ -2533,7 +2560,7 @@ class TreePLRU(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Decode\Decoder_c.scala
+## src\main\Decode\Decoder_c.scala
 
 ```scala
 package riscv
@@ -2689,7 +2716,7 @@ class Decoder(enableRV32M: Boolean = false) extends Module {
 }
 ```
 
-## src/main\Execute\ALU.scala
+## src\main\Execute\ALU.scala
 
 ```scala
 package riscv
@@ -2779,9 +2806,9 @@ class ParamALU(val xlen: Int = 32, val enableRV32M: Boolean = false) extends Mod
 }
 ```
 
-## src/main\frame.md
+## src\main\frame.md
 
-```md
+```scala
 # 娴佹按绾挎鏋惰鏄?
 ## IF 妯″潡
 
@@ -3364,7 +3391,7 @@ Branch predictor selection uses custom CSR `0x7C1` (`branchPredCtrl`).
 All predictors are updated in parallel from EX-stage branch resolution. The CSR only selects which predictor drives the IF-stage `bpuPredTaken`, `bpuPredTarget`, `rasPredValid`, and `rasPredTarget` signals.
 ```
 
-## src/main\Frontend\BPU.scala
+## src\main\Frontend\BPU.scala
 
 ```scala
 package riscv
@@ -3465,7 +3492,7 @@ class BPU extends Module {
 }
 ```
 
-## src/main\Frontend\BPU_RAS.scala
+## src\main\Frontend\BPU_RAS.scala
 
 ```scala
 package riscv
@@ -3598,7 +3625,7 @@ class BPU_RAS extends Module {
 }
 ```
 
-## src/main\Frontend\NextLinePrefetcher.scala
+## src\main\Frontend\NextLinePrefetcher.scala
 
 ```scala
 package riscv
@@ -3649,7 +3676,7 @@ class NextLinePrefetcher extends Module {
   // 浠呭湪 FSM sIdle 涓旀棤 miss 鏃剁疆楂橈級锛涢鍙栧櫒鏈韩涓嶉渶瑕侀噸璇曢€昏緫銆?}
 ```
 
-## src/main\Frontend\PcGen.scala
+## src\main\Frontend\PcGen.scala
 
 ```scala
 package riscv
@@ -3724,7 +3751,7 @@ class PcGen(
 }
 ```
 
-## src/main\Frontend\StrideStreamPrefetcher.scala
+## src\main\Frontend\StrideStreamPrefetcher.scala
 
 ```scala
 package riscv
@@ -3821,7 +3848,7 @@ class StreamPrefetcher extends Module {
 }
 ```
 
-## src/main\Frontend\TAGE.scala
+## src\main\Frontend\TAGE.scala
 
 ```scala
 package riscv
@@ -4148,7 +4175,7 @@ class TAGE extends Module {
 }
 ```
 
-## src/main\Icache\ICacheMissFSM.scala
+## src\main\Icache\ICacheMissFSM.scala
 
 ```scala
 package icache
@@ -4310,7 +4337,7 @@ class ICacheMissFSM(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Icache\ICacheParams.scala
+## src\main\Icache\ICacheParams.scala
 
 ```scala
 package icache
@@ -4328,7 +4355,7 @@ class ITagEntry(p: CacheParams) extends Bundle {
 }
 ```
 
-## src/main\Icache\ICacheTop.scala
+## src\main\Icache\ICacheTop.scala
 
 ```scala
 package icache
@@ -4505,7 +4532,7 @@ object ICacheTop {
 }
 ```
 
-## src/main\Icache\IDataArray.scala
+## src\main\Icache\IDataArray.scala
 
 ```scala
 package icache
@@ -4550,7 +4577,7 @@ class IDataArray(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Icache\IHitTest.scala
+## src\main\Icache\IHitTest.scala
 
 ```scala
 package icache
@@ -4587,7 +4614,7 @@ class IHitTest(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Icache\InstSelect.scala
+## src\main\Icache\InstSelect.scala
 
 ```scala
 package icache
@@ -4622,7 +4649,7 @@ class InstSelect(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Icache\ITagArray.scala
+## src\main\Icache\ITagArray.scala
 
 ```scala
 package icache
@@ -4671,7 +4698,7 @@ class ITagArray(p: CacheParams) extends Module {
 }
 ```
 
-## src/main\Memory\mem.scala
+## src\main\Memory\mem.scala
 
 ```scala
 package riscv
@@ -4755,7 +4782,7 @@ class RV32DualPortMemory(
 }
 ```
 
-## src/main\Top.scala
+## src\main\Top.scala
 
 ```scala
 package riscv
@@ -4797,4 +4824,5 @@ object Elaborate extends App {
   (new chisel3.stage.ChiselStage).emitVerilog(new Top)
 }
 ```
+
 

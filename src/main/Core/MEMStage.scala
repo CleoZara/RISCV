@@ -14,6 +14,7 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
     val mtimeLo = Input(UInt(32.W))
     val mtimeHi = Input(UInt(32.W))
     val dcacheFlush = Input(Bool())
+    val nextLinePrefetchEn = Input(Bool())
     val stridePrefetchEn = Input(Bool())
     val streamPrefetchEn = Input(Bool())
     val dcacheStall = Output(Bool())
@@ -86,10 +87,35 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
 
   val pfSelStream = streamPrefetcher.io.pfReqValid
   val pfSelStride = !pfSelStream && stridePrefetcher.io.pfReqValid
-  dcache.io.pfReqValid := pfSelStream || pfSelStride
-  dcache.io.pfReqAddr  := Mux(pfSelStream, streamPrefetcher.io.pfReqAddr, stridePrefetcher.io.pfReqAddr)
-  streamPrefetcher.io.pfReqReady := dcache.io.pfReqReady && pfSelStream
-  stridePrefetcher.io.pfReqReady := dcache.io.pfReqReady && pfSelStride
+  val nextLinePfValid = io.nextLinePrefetchEn && pfObserve
+  val nextLinePfAddr  = Cat(memAddr(31, 6) + 1.U, 0.U(6.W))
+  val rawPfValid = pfSelStream || pfSelStride || nextLinePfValid
+  val rawPfAddr = Mux(pfSelStream, streamPrefetcher.io.pfReqAddr,
+    Mux(pfSelStride, stridePrefetcher.io.pfReqAddr, nextLinePfAddr))
+
+  val pfPendingValid = RegInit(false.B)
+  val pfPendingAddr  = RegInit(0.U(32.W))
+  val pfIssueValid   = pfPendingValid || rawPfValid
+  val pfIssueAddr    = Mux(pfPendingValid, pfPendingAddr, rawPfAddr)
+
+  dcache.io.pfReqValid := pfIssueValid
+  dcache.io.pfReqAddr  := pfIssueAddr
+
+  val pfAccepted = pfIssueValid && dcache.io.pfReqReady
+  when(io.flushMem) {
+    pfPendingValid := false.B
+  }.elsewhen(pfPendingValid) {
+    when(pfAccepted) {
+      pfPendingValid := false.B
+    }
+  }.elsewhen(rawPfValid && !pfAccepted) {
+    pfPendingValid := true.B
+    pfPendingAddr  := rawPfAddr
+  }
+
+  val rawPfCanAccept = !pfPendingValid && dcache.io.pfReqReady
+  streamPrefetcher.io.pfReqReady := rawPfCanAccept && pfSelStream
+  stridePrefetcher.io.pfReqReady := rawPfCanAccept && pfSelStride
 
   val printPc   = io.in(memIdx).pc
   val printBits = io.in(memIdx).rs2Data(7, 0)
