@@ -7,7 +7,8 @@ import parameterized_cache.{CacheParams, MemBusIO}
 class Top(
     enableRV32M: Boolean = false,
     cacheParams: CacheParams = CacheParams.default,
-    dCacheParams: Option[CacheParams] = None) extends Module {
+    dCacheParams: Option[CacheParams] = None,
+    branchPredInit: Int = 1) extends Module {
   private val ip = cacheParams
   private val dp = dCacheParams.getOrElse(cacheParams)
 
@@ -19,7 +20,7 @@ class Top(
     val perf = Output(new CorePerfCounters)
   })
 
-  val core = Module(new InOrderCore(enableRV32M, ip, Some(dp)))
+  val core = Module(new InOrderCore(enableRV32M, ip, Some(dp), branchPredInit))
   val memory = Module(new RV32DualPortMemory(ip))
 
   memory.io.imem <> core.io.imem

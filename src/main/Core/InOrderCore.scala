@@ -7,7 +7,8 @@ import parameterized_cache.{CacheParams, MemBusIO}
 class InOrderCore(
     enableRV32M: Boolean = false,
     cacheParams: CacheParams = CacheParams.default,
-    dCacheParams: Option[CacheParams] = None) extends Module {
+    dCacheParams: Option[CacheParams] = None,
+    branchPredInit: Int = 1) extends Module {
   val issueWidth = 2
   private val ip = cacheParams
   private val dp = dCacheParams.getOrElse(cacheParams)
@@ -27,8 +28,10 @@ class InOrderCore(
   val memStage = Module(new MEMStage(dp))
   val wbStage  = Module(new WBStage)
   val regFile  = Module(new RegFile(issueWidth))
-  val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M))
-  val bpu      = Module(new BPU_RAS)
+  val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M, branchPredInit))
+  val bpu      = Module(new BPU)
+  val bpuRas   = Module(new BPU_RAS)
+  val tage     = Module(new TAGE)
   val bypass   = Module(new PipelineBypassUnit(issueWidth))
   val hazard   = Module(new BypassHazardUnit(issueWidth))
 
@@ -45,17 +48,42 @@ class InOrderCore(
   io.success  := memStage.io.success
   // ── BPU ───────────────────────────────────────────────────────────────
   bpu.io.queryPc      := ifStage.io.bpuQueryPc
-  ifStage.io.bpuPredTaken  := bpu.io.predTaken
-  ifStage.io.bpuPredTarget := bpu.io.predTarget
   bpu.io.updateValid  := exStage.io.bpuUpdateValid
   bpu.io.updatePc     := exStage.io.bpuUpdatePc
   bpu.io.updateTaken  := exStage.io.bpuUpdateTaken
   bpu.io.updateTarget := exStage.io.bpuUpdateTarget
-  bpu.io.ras.push       := idStage.io.rasPush
-  bpu.io.ras.pushAddr   := idStage.io.rasPushAddr
-  bpu.io.ras.pop        := idStage.io.rasPop
-  bpu.io.ras.flush      := false.B
-  bpu.io.ras.checkpoint := 0.U
+
+  bpuRas.io.queryPc      := ifStage.io.bpuQueryPc
+  bpuRas.io.updateValid  := exStage.io.bpuUpdateValid
+  bpuRas.io.updatePc     := exStage.io.bpuUpdatePc
+  bpuRas.io.updateTaken  := exStage.io.bpuUpdateTaken
+  bpuRas.io.updateTarget := exStage.io.bpuUpdateTarget
+  bpuRas.io.ras.push       := idStage.io.rasPush
+  bpuRas.io.ras.pushAddr   := idStage.io.rasPushAddr
+  bpuRas.io.ras.pop        := idStage.io.rasPop
+  bpuRas.io.ras.flush      := false.B
+  bpuRas.io.ras.checkpoint := 0.U
+
+  tage.io.queryPc      := ifStage.io.bpuQueryPc
+  tage.io.updateValid  := exStage.io.bpuUpdateValid
+  tage.io.updatePc     := exStage.io.bpuUpdatePc
+  tage.io.updateTaken  := exStage.io.bpuUpdateTaken
+  tage.io.updateTarget := exStage.io.bpuUpdateTarget
+  tage.io.ras.push       := idStage.io.rasPush
+  tage.io.ras.pushAddr   := idStage.io.rasPushAddr
+  tage.io.ras.pop        := idStage.io.rasPop
+  tage.io.ras.flush      := false.B
+  tage.io.ras.checkpoint := 0.U
+
+  val branchPredMode = csrFile.io.branchPredCtrl(1, 0)
+  val usePlainBpu = branchPredMode === 0.U
+  val useTage     = branchPredMode === 2.U
+  val useBpuRas   = !usePlainBpu && !useTage
+
+  ifStage.io.bpuPredTaken := Mux(usePlainBpu, bpu.io.predTaken,
+    Mux(useTage, tage.io.predTaken, bpuRas.io.predTaken))
+  ifStage.io.bpuPredTarget := Mux(usePlainBpu, bpu.io.predTarget,
+    Mux(useTage, tage.io.predTarget, bpuRas.io.predTarget))
 
   // ── IF Stage ──────────────────────────────────────────────────────────
   ifStage.io.exRedirectValid     := exStage.io.exRedirectValid
@@ -64,8 +92,9 @@ class InOrderCore(
   ifStage.io.idRedirectPc        := idStage.io.idRedirectPc
   ifStage.io.flushIf             := hazard.io.flushIF
   ifStage.io.stallIf             := hazard.io.stallIF || idStage.io.holdIfId
-  ifStage.io.rasPredValid        := bpu.io.ras.topValid
-  ifStage.io.rasPredTarget       := bpu.io.ras.topAddr
+  ifStage.io.rasPredValid        := Mux(useTage, tage.io.ras.topValid,
+    Mux(useBpuRas, bpuRas.io.ras.topValid, false.B))
+  ifStage.io.rasPredTarget       := Mux(useTage, tage.io.ras.topAddr, bpuRas.io.ras.topAddr)
   ifStage.io.nextLinePrefetchEn  := csrFile.io.prefetchCtrl(0)
   ifStage.io.stridePrefetchEn    := csrFile.io.prefetchCtrl(1)
   ifStage.io.streamPrefetchEn    := csrFile.io.prefetchCtrl(2)

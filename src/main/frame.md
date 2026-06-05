@@ -613,3 +613,16 @@ Current prefetch control uses CSR `0x7C0`:
 | `prefetchCtrl(2)` | `streamPrefetchEn` | Enables IF/I-Cache and MEM/D-Cache stream prefetch. |
 
 D-Cache now exposes `pfReqValid`, `pfReqReady`, and `pfReqAddr`. Demand load/store miss has priority over prefetch. A D-Cache prefetch miss may occupy the memory refill FSM, but it must not directly freeze the pipeline unless a demand miss arrives while the FSM is busy.
+
+## Branch Predictor Mode CSR
+
+Branch predictor selection uses custom CSR `0x7C1` (`branchPredCtrl`).
+
+| Bits | Value | Mode | Description |
+| --- | --- | --- | --- |
+| `[1:0]` | `0` | `BPU` | Bi-mode direction predictor plus BTB. RAS is disabled. |
+| `[1:0]` | `1` | `BPU_RAS` | Bi-mode direction predictor plus BTB and return-address stack. This is the reset default. |
+| `[1:0]` | `2` | `TAGE` | Simplified TAGE direction predictor plus BTB and return-address stack. |
+| `[1:0]` | `3` | `BPU_RAS` | Reserved value, currently falls back to `BPU_RAS`. |
+
+All predictors are updated in parallel from EX-stage branch resolution. The CSR only selects which predictor drives the IF-stage `bpuPredTaken`, `bpuPredTarget`, `rasPredValid`, and `rasPredTarget` signals.

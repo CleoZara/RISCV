@@ -22,12 +22,18 @@ object CSRAddr {
   val mcountinhibit = "h320".U(12.W)
   val misa          = "h301".U(12.W)
   val prefetchCtrl  = "h7C0".U(12.W) // bit0=next-line, bit1=stride, bit2=stream
+  val branchPredCtrl = "h7C1".U(12.W) // bits[1:0]: 0=BPU, 1=BPU+RAS, 2=TAGE+RAS
 }
 
 // CSROp 鐜扮粺涓€瀹氫箟鍦?Defines_c.scala锛坥bject CSROp锛夛紝姝ゅ涓嶅啀閲嶅瀹氫箟銆?
-class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Boolean = false) extends Module {
+class CSRFile(
+    val xlen: Int = 32,
+    val issueWidth: Int = 2,
+    val enableRV32M: Boolean = false,
+    val branchPredInit: Int = 1) extends Module {
   require(xlen == 32, "Current CSRFile implementation targets RV32")
   require(issueWidth >= 1, "issueWidth must be >= 1")
+  require(branchPredInit >= 0 && branchPredInit <= 3, "branchPredInit must fit in branchPredCtrl[1:0]")
 
   val io = IO(new Bundle {
     // Query/read port (for decode/execute preview).
@@ -52,6 +58,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
 
     // mtime锛圡MIO 瀹炴椂璁℃暟鍣紝姣忓懆鏈熻嚜澧烇級锛氫緵椤跺眰閫佸線 D-Cache 鐨?mtimeLo/mtimeHi銆?    val mtimeLo = Output(UInt(xlen.W))
     val mtimeHi = Output(UInt(xlen.W))
+    val branchPredCtrl = Output(UInt(xlen.W))
 
     // 棰勫彇寮€鍏筹細bit0=Next-line, bit1=Stride锛岄€佸線棰勫彇鍣ㄣ€?    val prefetchCtrl = Output(UInt(xlen.W))
   })
@@ -61,6 +68,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
   val mtime         = RegInit(0.U(64.W))
   val mcountinhibit = RegInit(0.U(xlen.W))
   val prefetchCtrl  = RegInit(0.U(xlen.W))
+  val branchPredCtrl = RegInit(branchPredInit.U(xlen.W))
 
   // misa锛氬彧璇汇€侻XL=01锛圧V32锛夌疆浜?bit[31:30]锛?I'=bit8锛涘惈 M 鏃跺啀缃?'M'=bit12銆?  val misaVal = {
     val base = ("h40000000".U(32.W) | (1.U << 8)) // RV32 + I
@@ -85,7 +93,8 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
       CSRAddr.minstreth     -> minstret(63, 32),
       CSRAddr.mcountinhibit -> mcountinhibit,
       CSRAddr.misa          -> misaVal,
-      CSRAddr.prefetchCtrl  -> prefetchCtrl
+      CSRAddr.prefetchCtrl  -> prefetchCtrl,
+      CSRAddr.branchPredCtrl -> branchPredCtrl
     ))
   }
 
@@ -113,6 +122,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
       is(CSRAddr.minstreth)     { minstret := Cat(writeVal, minstret(31, 0)) }
       is(CSRAddr.mcountinhibit) { mcountinhibit := writeVal }
       is(CSRAddr.prefetchCtrl)  { prefetchCtrl := writeVal }
+      is(CSRAddr.branchPredCtrl) { branchPredCtrl := writeVal }
       // misa 鍙锛氬拷鐣ュ啓鍏?    }
   }
 
@@ -122,6 +132,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
   io.mtimeLo    := mtime(31, 0)
   io.mtimeHi    := mtime(63, 32)
   io.prefetchCtrl := prefetchCtrl
+  io.branchPredCtrl := branchPredCtrl
 }
 ```
 
@@ -1445,7 +1456,8 @@ import parameterized_cache.{CacheParams, MemBusIO}
 class InOrderCore(
     enableRV32M: Boolean = false,
     cacheParams: CacheParams = CacheParams.default,
-    dCacheParams: Option[CacheParams] = None) extends Module {
+    dCacheParams: Option[CacheParams] = None,
+    branchPredInit: Int = 1) extends Module {
   val issueWidth = 2
   private val ip = cacheParams
   private val dp = dCacheParams.getOrElse(cacheParams)
@@ -1465,8 +1477,10 @@ class InOrderCore(
   val memStage = Module(new MEMStage(dp))
   val wbStage  = Module(new WBStage)
   val regFile  = Module(new RegFile(issueWidth))
-  val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M))
-  val bpu      = Module(new BPU_RAS)
+  val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M, branchPredInit))
+  val bpu      = Module(new BPU)
+  val bpuRas   = Module(new BPU_RAS)
+  val tage     = Module(new TAGE)
   val bypass   = Module(new PipelineBypassUnit(issueWidth))
   val hazard   = Module(new BypassHazardUnit(issueWidth))
 
@@ -1483,17 +1497,42 @@ class InOrderCore(
   io.success  := memStage.io.success
   // 鈹€鈹€ BPU 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   bpu.io.queryPc      := ifStage.io.bpuQueryPc
-  ifStage.io.bpuPredTaken  := bpu.io.predTaken
-  ifStage.io.bpuPredTarget := bpu.io.predTarget
   bpu.io.updateValid  := exStage.io.bpuUpdateValid
   bpu.io.updatePc     := exStage.io.bpuUpdatePc
   bpu.io.updateTaken  := exStage.io.bpuUpdateTaken
   bpu.io.updateTarget := exStage.io.bpuUpdateTarget
-  bpu.io.ras.push       := idStage.io.rasPush
-  bpu.io.ras.pushAddr   := idStage.io.rasPushAddr
-  bpu.io.ras.pop        := idStage.io.rasPop
-  bpu.io.ras.flush      := false.B
-  bpu.io.ras.checkpoint := 0.U
+
+  bpuRas.io.queryPc      := ifStage.io.bpuQueryPc
+  bpuRas.io.updateValid  := exStage.io.bpuUpdateValid
+  bpuRas.io.updatePc     := exStage.io.bpuUpdatePc
+  bpuRas.io.updateTaken  := exStage.io.bpuUpdateTaken
+  bpuRas.io.updateTarget := exStage.io.bpuUpdateTarget
+  bpuRas.io.ras.push       := idStage.io.rasPush
+  bpuRas.io.ras.pushAddr   := idStage.io.rasPushAddr
+  bpuRas.io.ras.pop        := idStage.io.rasPop
+  bpuRas.io.ras.flush      := false.B
+  bpuRas.io.ras.checkpoint := 0.U
+
+  tage.io.queryPc      := ifStage.io.bpuQueryPc
+  tage.io.updateValid  := exStage.io.bpuUpdateValid
+  tage.io.updatePc     := exStage.io.bpuUpdatePc
+  tage.io.updateTaken  := exStage.io.bpuUpdateTaken
+  tage.io.updateTarget := exStage.io.bpuUpdateTarget
+  tage.io.ras.push       := idStage.io.rasPush
+  tage.io.ras.pushAddr   := idStage.io.rasPushAddr
+  tage.io.ras.pop        := idStage.io.rasPop
+  tage.io.ras.flush      := false.B
+  tage.io.ras.checkpoint := 0.U
+
+  val branchPredMode = csrFile.io.branchPredCtrl(1, 0)
+  val usePlainBpu = branchPredMode === 0.U
+  val useTage     = branchPredMode === 2.U
+  val useBpuRas   = !usePlainBpu && !useTage
+
+  ifStage.io.bpuPredTaken := Mux(usePlainBpu, bpu.io.predTaken,
+    Mux(useTage, tage.io.predTaken, bpuRas.io.predTaken))
+  ifStage.io.bpuPredTarget := Mux(usePlainBpu, bpu.io.predTarget,
+    Mux(useTage, tage.io.predTarget, bpuRas.io.predTarget))
 
   // 鈹€鈹€ IF Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   ifStage.io.exRedirectValid     := exStage.io.exRedirectValid
@@ -1502,8 +1541,9 @@ class InOrderCore(
   ifStage.io.idRedirectPc        := idStage.io.idRedirectPc
   ifStage.io.flushIf             := hazard.io.flushIF
   ifStage.io.stallIf             := hazard.io.stallIF || idStage.io.holdIfId
-  ifStage.io.rasPredValid        := bpu.io.ras.topValid
-  ifStage.io.rasPredTarget       := bpu.io.ras.topAddr
+  ifStage.io.rasPredValid        := Mux(useTage, tage.io.ras.topValid,
+    Mux(useBpuRas, bpuRas.io.ras.topValid, false.B))
+  ifStage.io.rasPredTarget       := Mux(useTage, tage.io.ras.topAddr, bpuRas.io.ras.topAddr)
   ifStage.io.nextLinePrefetchEn  := csrFile.io.prefetchCtrl(0)
   ifStage.io.stridePrefetchEn    := csrFile.io.prefetchCtrl(1)
   ifStage.io.streamPrefetchEn    := csrFile.io.prefetchCtrl(2)
@@ -3315,6 +3355,19 @@ Current prefetch control uses CSR `0x7C0`:
 | `prefetchCtrl(2)` | `streamPrefetchEn` | Enables IF/I-Cache and MEM/D-Cache stream prefetch. |
 
 D-Cache now exposes `pfReqValid`, `pfReqReady`, and `pfReqAddr`. Demand load/store miss has priority over prefetch. A D-Cache prefetch miss may occupy the memory refill FSM, but it must not directly freeze the pipeline unless a demand miss arrives while the FSM is busy.
+
+## Branch Predictor Mode CSR
+
+Branch predictor selection uses custom CSR `0x7C1` (`branchPredCtrl`).
+
+| Bits | Value | Mode | Description |
+| --- | --- | --- | --- |
+| `[1:0]` | `0` | `BPU` | Bi-mode direction predictor plus BTB. RAS is disabled. |
+| `[1:0]` | `1` | `BPU_RAS` | Bi-mode direction predictor plus BTB and return-address stack. This is the reset default. |
+| `[1:0]` | `2` | `TAGE` | Simplified TAGE direction predictor plus BTB and return-address stack. |
+| `[1:0]` | `3` | `BPU_RAS` | Reserved value, currently falls back to `BPU_RAS`. |
+
+All predictors are updated in parallel from EX-stage branch resolution. The CSR only selects which predictor drives the IF-stage `bpuPredTaken`, `bpuPredTarget`, `rasPredValid`, and `rasPredTarget` signals.
 ```
 
 ## src/main\Frontend\BPU.scala
@@ -4077,17 +4130,26 @@ class TAGE extends Module {
   // 鈹€鈹€ RAS: identical implementation to BPU 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   val rasStack = RegInit(VecInit(Seq.fill(16)(0.U(32.W))))
   val rasPtr   = RegInit(0.U(4.W))
+  val rasCount = RegInit(0.U(5.W))
 
   io.ras.topAddr := rasStack(rasPtr)
+  io.ras.topValid := rasCount =/= 0.U
 
   when(io.ras.flush) {
     rasPtr := io.ras.checkpoint
+    rasCount := 0.U
   } .elsewhen(io.ras.push) {
     val nextPtr = (rasPtr + 1.U)(3, 0)
     rasStack(nextPtr) := io.ras.pushAddr
     rasPtr            := nextPtr
+    when(rasCount =/= 16.U) {
+      rasCount := rasCount + 1.U
+    }
   } .elsewhen(io.ras.pop) {
     rasPtr := (rasPtr - 1.U)(3, 0)
+    when(rasCount =/= 0.U) {
+      rasCount := rasCount - 1.U
+    }
   }
 }
 ```
@@ -4711,7 +4773,8 @@ import parameterized_cache.{CacheParams, MemBusIO}
 class Top(
     enableRV32M: Boolean = false,
     cacheParams: CacheParams = CacheParams.default,
-    dCacheParams: Option[CacheParams] = None) extends Module {
+    dCacheParams: Option[CacheParams] = None,
+    branchPredInit: Int = 1) extends Module {
   private val ip = cacheParams
   private val dp = dCacheParams.getOrElse(cacheParams)
 
@@ -4723,7 +4786,7 @@ class Top(
     val perf = Output(new CorePerfCounters)
   })
 
-  val core = Module(new InOrderCore(enableRV32M, ip, Some(dp)))
+  val core = Module(new InOrderCore(enableRV32M, ip, Some(dp), branchPredInit))
   val memory = Module(new RV32DualPortMemory(ip))
 
   memory.io.imem <> core.io.imem

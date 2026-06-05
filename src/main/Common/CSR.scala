@@ -17,13 +17,19 @@ object CSRAddr {
   val mcountinhibit = "h320".U(12.W)
   val misa          = "h301".U(12.W)
   val prefetchCtrl  = "h7C0".U(12.W) // bit0=next-line, bit1=stride, bit2=stream
+  val branchPredCtrl = "h7C1".U(12.W) // bits[1:0]: 0=BPU, 1=BPU+RAS, 2=TAGE+RAS
 }
 
 // CSROp 现统一定义在 Defines_c.scala（object CSROp），此处不再重复定义。
 
-class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Boolean = false) extends Module {
+class CSRFile(
+    val xlen: Int = 32,
+    val issueWidth: Int = 2,
+    val enableRV32M: Boolean = false,
+    val branchPredInit: Int = 1) extends Module {
   require(xlen == 32, "Current CSRFile implementation targets RV32")
   require(issueWidth >= 1, "issueWidth must be >= 1")
+  require(branchPredInit >= 0 && branchPredInit <= 3, "branchPredInit must fit in branchPredCtrl[1:0]")
 
   val io = IO(new Bundle {
     // Query/read port (for decode/execute preview).
@@ -49,6 +55,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
     // mtime（MMIO 实时计数器，每周期自增）：供顶层送往 D-Cache 的 mtimeLo/mtimeHi。
     val mtimeLo = Output(UInt(xlen.W))
     val mtimeHi = Output(UInt(xlen.W))
+    val branchPredCtrl = Output(UInt(xlen.W))
 
     // 预取开关：bit0=Next-line, bit1=Stride，送往预取器。
     val prefetchCtrl = Output(UInt(xlen.W))
@@ -59,6 +66,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
   val mtime         = RegInit(0.U(64.W))
   val mcountinhibit = RegInit(0.U(xlen.W))
   val prefetchCtrl  = RegInit(0.U(xlen.W))
+  val branchPredCtrl = RegInit(branchPredInit.U(xlen.W))
 
   // misa：只读。MXL=01（RV32）置于 bit[31:30]，'I'=bit8；含 M 时再置 'M'=bit12。
   val misaVal = {
@@ -85,7 +93,8 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
       CSRAddr.minstreth     -> minstret(63, 32),
       CSRAddr.mcountinhibit -> mcountinhibit,
       CSRAddr.misa          -> misaVal,
-      CSRAddr.prefetchCtrl  -> prefetchCtrl
+      CSRAddr.prefetchCtrl  -> prefetchCtrl,
+      CSRAddr.branchPredCtrl -> branchPredCtrl
     ))
   }
 
@@ -113,6 +122,7 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
       is(CSRAddr.minstreth)     { minstret := Cat(writeVal, minstret(31, 0)) }
       is(CSRAddr.mcountinhibit) { mcountinhibit := writeVal }
       is(CSRAddr.prefetchCtrl)  { prefetchCtrl := writeVal }
+      is(CSRAddr.branchPredCtrl) { branchPredCtrl := writeVal }
       // misa 只读：忽略写入
     }
   }
@@ -123,4 +133,5 @@ class CSRFile(val xlen: Int = 32, val issueWidth: Int = 2, val enableRV32M: Bool
   io.mtimeLo    := mtime(31, 0)
   io.mtimeHi    := mtime(63, 32)
   io.prefetchCtrl := prefetchCtrl
+  io.branchPredCtrl := branchPredCtrl
 }
