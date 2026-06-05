@@ -365,8 +365,8 @@
 // #define rdcycle() read_csr(cycle)
 // #define rdinstret() read_csr(instret)
 #define rdtime() read_csr(0xC01)
-#define rdcycle() read_csr(0xC01)
-#define rdinstret() read_csr(0xC00)
+#define rdcycle() read_csr(0xC00)
+#define rdinstret() read_csr(0xC02)
 
 #endif
 

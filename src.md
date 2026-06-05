@@ -1,4 +1,4 @@
-﻿# src/main source snapshot
+# src/main source snapshot
 
 ## src/main\Common\CSR.scala
 
@@ -1495,7 +1495,7 @@ class InOrderCore(
   io.debugPc  := ifStage.io.debugPc
   // P0 fix: wire real success signal from DCacheTop (via MEMStage)
   io.success  := memStage.io.success
-  // 鈹€鈹€ BPU 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // BPU
   bpu.io.queryPc      := ifStage.io.bpuQueryPc
   bpu.io.updateValid  := exStage.io.bpuUpdateValid
   bpu.io.updatePc     := exStage.io.bpuUpdatePc
@@ -1534,7 +1534,7 @@ class InOrderCore(
   ifStage.io.bpuPredTarget := Mux(usePlainBpu, bpu.io.predTarget,
     Mux(useTage, tage.io.predTarget, bpuRas.io.predTarget))
 
-  // 鈹€鈹€ IF Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // IF Stage
   ifStage.io.exRedirectValid     := exStage.io.exRedirectValid
   ifStage.io.exRedirectPc        := exStage.io.exRedirectPc
   ifStage.io.idRedirectValid     := idStage.io.idRedirectValid
@@ -1548,7 +1548,7 @@ class InOrderCore(
   ifStage.io.stridePrefetchEn    := csrFile.io.prefetchCtrl(1)
   ifStage.io.streamPrefetchEn    := csrFile.io.prefetchCtrl(2)
 
-  // 鈹€鈹€ ID Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // ID Stage
   idStage.io.in         := ifidReg
   idStage.io.stallId    := hazard.io.stallID
   idStage.io.flushId    := hazard.io.flushID
@@ -1563,7 +1563,7 @@ class InOrderCore(
   regFile.io.waddr   := wbStage.io.regWaddr
   regFile.io.wdata   := wbStage.io.regWdata
 
-  // 鈹€鈹€ CSR File 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // CSR File
   csrFile.io.raddr   := idStage.io.csrRaddr
   csrFile.io.opValid := exStage.io.csrOpValid
   csrFile.io.opType  := exStage.io.csrOpType
@@ -1571,21 +1571,15 @@ class InOrderCore(
   csrFile.io.wdata   := exStage.io.csrWdata
   csrFile.io.cycleTick := true.B
 
-  // P1 fix: minstret must count each instruction exactly once.
-  // During any structural stall (D-/I-Cache miss), memwbReg is frozen, so
-  // wbStage.io.instRetire stays high every stall cycle 鈫?over-counts.
-  // Solution: only count in the *first* cycle of a stall (when the WB
-  // instruction genuinely completes) and suppress all subsequent stall cycles.
-  val prevStallWB    = RegNext(hazard.io.stallWB, false.B)
-  val firstStallCycle = hazard.io.stallWB && !prevStallWB
-  // retireEnable = true when pipeline is advancing OR it is the very first
-  // cycle of a stall (the instruction that just "stopped" still retires once).
-  val retireEnable = !hazard.io.stallWB || firstStallCycle
+  // Count/write back only when the WB stage advances. During an I-/D-cache
+  // stall memwbReg is frozen, so wbStage.io.instRetire keeps reflecting the
+  // same instruction and must not be counted again.
+  val retireEnable = !hazard.io.stallWB
   wbRegWen := VecInit(wbStage.io.regWen.map(_ && retireEnable))
   val retireVec = VecInit(wbStage.io.instRetire.map(_ && retireEnable))
   csrFile.io.instRetire := retireVec
 
-  // 鈹€鈹€ Bypass Network 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // Bypass Network
   bypass.io.idex      := idexReg
   bypass.io.idexValid := VecInit(idexReg.map(x => x.ctrl.valid && !x.ctrl.kill))
   bypass.io.exResult  := exStage.io.exResult
@@ -1600,7 +1594,7 @@ class InOrderCore(
   bypass.io.rs1Use    := VecInit(idexReg.map(_.rs1Use))
   bypass.io.rs2Use    := VecInit(idexReg.map(_.rs2Use))
 
-  // 鈹€鈹€ EX Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // EX Stage
   exStage.io.in        := idexReg
   exStage.io.stallEx   := hazard.io.stallEX
   exStage.io.flushEx   := false.B
@@ -1611,7 +1605,7 @@ class InOrderCore(
   exStage.io.storeData := bypass.io.storeData
   exStage.io.csrOldData := csrFile.io.oldData
 
-  // 鈹€鈹€ MEM Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // MEM Stage
   memStage.io.in         := exmemReg
   memStage.io.flushMem   := false.B
   memStage.io.mtimeLo    := csrFile.io.mtimeLo
@@ -1620,10 +1614,10 @@ class InOrderCore(
   memStage.io.stridePrefetchEn := csrFile.io.prefetchCtrl(1)
   memStage.io.streamPrefetchEn := csrFile.io.prefetchCtrl(2)
 
-  // 鈹€鈹€ WB Stage 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // WB Stage
   wbStage.io.in := memwbReg
 
-  // 鈹€鈹€ Hazard Unit 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // Hazard Unit
   hazard.io.idValid   := idStage.io.hazardIdValid
   hazard.io.idRs1Addr := idStage.io.hazardRs1Addr
   hazard.io.idRs2Addr := idStage.io.hazardRs2Addr
@@ -1641,7 +1635,7 @@ class InOrderCore(
   hazard.io.memRdAddr := VecInit(exmemReg.map(_.rdAddr))
   hazard.io.memRfWen  := VecInit(exmemReg.map(_.rfWen))
   hazard.io.pendingWaw := VecInit(Seq.fill(4)(0.U.asTypeOf(new PendingRegWriteInfo)))
-  // brTaken is merged into exRedirect (branch mispred 鈫?exRedirectValid).
+  // brTaken is merged into exRedirect (branch mispred -> exRedirectValid).
   hazard.io.brTaken     := false.B
   hazard.io.exRedirect  := exStage.io.exRedirectValid
   hazard.io.idRedirect  := idStage.io.idRedirectValid
@@ -1649,7 +1643,7 @@ class InOrderCore(
   hazard.io.dcacheStall := memStage.io.dcacheStall
   hazard.io.backendStall := false.B
 
-  // 鈹€鈹€ Pipeline register update logic 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // Pipeline register update logic
   val retireCount = PopCount(retireVec)
   val perfCycles = RegInit(0.U(64.W))
   val perfRetire0 = RegInit(0.U(64.W))
