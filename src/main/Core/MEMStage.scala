@@ -14,7 +14,6 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
     val mtimeLo = Input(UInt(32.W))
     val mtimeHi = Input(UInt(32.W))
     val dcacheFlush = Input(Bool())
-    val nextLinePrefetchEn = Input(Bool())
     val stridePrefetchEn = Input(Bool())
     val streamPrefetchEn = Input(Bool())
     val dcacheStall = Output(Bool())
@@ -77,7 +76,7 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
     (memAddr =/= "h10001FF1".U(32.W)) &&
     (memAddr =/= "h0000BFF8".U(32.W)) &&
     (memAddr =/= "h0000BFFC".U(32.W))
-  val pfObserve = memReqValid && pfAddrCacheable
+  val pfObserve = memReqValid && io.in(memIdx).memRen && pfAddrCacheable
   stridePrefetcher.io.observeValid := pfObserve
   stridePrefetcher.io.observeAddr  := memAddr
   stridePrefetcher.io.prefetchEn   := io.stridePrefetchEn
@@ -87,11 +86,8 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
 
   val pfSelStream = streamPrefetcher.io.pfReqValid
   val pfSelStride = !pfSelStream && stridePrefetcher.io.pfReqValid
-  val nextLinePfValid = io.nextLinePrefetchEn && pfObserve
-  val nextLinePfAddr  = Cat(memAddr(31, 6) + 1.U, 0.U(6.W))
-  val rawPfValid = pfSelStream || pfSelStride || nextLinePfValid
-  val rawPfAddr = Mux(pfSelStream, streamPrefetcher.io.pfReqAddr,
-    Mux(pfSelStride, stridePrefetcher.io.pfReqAddr, nextLinePfAddr))
+  val rawPfValid = pfSelStream || pfSelStride
+  val rawPfAddr = Mux(pfSelStream, streamPrefetcher.io.pfReqAddr, stridePrefetcher.io.pfReqAddr)
 
   val pfPendingValid = RegInit(false.B)
   val pfPendingAddr  = RegInit(0.U(32.W))

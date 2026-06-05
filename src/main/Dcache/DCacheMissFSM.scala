@@ -31,6 +31,7 @@ class DCacheMissFSMIO(p: CacheParams) extends Bundle {
 
   val stall       = Output(Bool())
   val isIdle      = Output(Bool())
+  val arrayWriteBusy = Output(Bool())
 }
 
 class DCacheMissFSM(p: CacheParams) extends Module {
@@ -114,4 +115,5 @@ class DCacheMissFSM(p: CacheParams) extends Module {
   io.refillIsStore := isStore
   io.stall        := state =/= sIdle && !isPrefetch
   io.isIdle       := state === sIdle
+  io.arrayWriteBusy := isPrefetch && (state === sRefillWrite || state === sDone)
 }

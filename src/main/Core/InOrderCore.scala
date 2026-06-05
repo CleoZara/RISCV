@@ -8,7 +8,8 @@ class InOrderCore(
     enableRV32M: Boolean = false,
     cacheParams: CacheParams = CacheParams.default,
     dCacheParams: Option[CacheParams] = None,
-    branchPredInit: Int = 1) extends Module {
+    branchPredInit: Int = 1,
+    prefetchInit: Int = 0) extends Module {
   val issueWidth = 2
   private val ip = cacheParams
   private val dp = dCacheParams.getOrElse(cacheParams)
@@ -28,7 +29,7 @@ class InOrderCore(
   val memStage = Module(new MEMStage(dp))
   val wbStage  = Module(new WBStage)
   val regFile  = Module(new RegFile(issueWidth))
-  val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M, branchPredInit))
+  val csrFile  = Module(new CSRFile(32, issueWidth, enableRV32M, branchPredInit, prefetchInit))
   val bpu      = Module(new BPU)
   val bpuRas   = Module(new BPU_RAS)
   val tage     = Module(new TAGE)
@@ -162,7 +163,6 @@ class InOrderCore(
   memStage.io.mtimeLo    := csrFile.io.mtimeLo
   memStage.io.mtimeHi    := csrFile.io.mtimeHi
   memStage.io.dcacheFlush := false.B
-  memStage.io.nextLinePrefetchEn := csrFile.io.prefetchCtrl(0)
   memStage.io.stridePrefetchEn := csrFile.io.prefetchCtrl(1)
   memStage.io.streamPrefetchEn := csrFile.io.prefetchCtrl(2)
 

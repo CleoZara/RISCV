@@ -15,7 +15,8 @@ class SimTop(
     enableRV32M: Boolean = false,
     cacheParams: CacheParams = CacheParams.default,
     dCacheParams: Option[CacheParams] = None,
-    branchPredInit: Int = 1
+    branchPredInit: Int = 1,
+    prefetchInit: Int = 0
 ) extends Module {
   private val ip = cacheParams
   private val dp = dCacheParams.getOrElse(cacheParams)
@@ -27,7 +28,7 @@ class SimTop(
     val perf      = Output(new CorePerfCounters)
   })
 
-  val core   = Module(new InOrderCore(enableRV32M, ip, Some(dp), branchPredInit))
+  val core   = Module(new InOrderCore(enableRV32M, ip, Some(dp), branchPredInit, prefetchInit))
   val memory = Module(new RV32DualPortMemory(ip, initFile = initFile))
 
   memory.io.imem <> core.io.imem

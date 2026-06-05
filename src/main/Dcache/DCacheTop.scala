@@ -171,7 +171,7 @@ class DCacheTop(p: CacheParams) extends Module {
     (addrIsHalt  && io.memRen) -> 0.U   // load from halt addr → undefined, return 0
   ))
 
-  val topStall = cacheMiss || missFsm.io.stall
+  val topStall = cacheMiss || missFsm.io.stall || (missFsm.io.arrayWriteBusy && demandReq)
   io.missOut := topStall
   io.stall   := topStall
 }

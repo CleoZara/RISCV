@@ -16,7 +16,7 @@ object CSRAddr {
   val minstreth     = "hB82".U(12.W)
   val mcountinhibit = "h320".U(12.W)
   val misa          = "h301".U(12.W)
-  val prefetchCtrl  = "h7C0".U(12.W) // bit0=next-line, bit1=stride, bit2=stream
+  val prefetchCtrl  = "h7C0".U(12.W) // bit0=ICache next-line, bit1=stride, bit2=stream
   val branchPredCtrl = "h7C1".U(12.W) // bits[1:0]: 0=BPU, 1=BPU+RAS, 2=TAGE+RAS
 }
 
@@ -26,10 +26,12 @@ class CSRFile(
     val xlen: Int = 32,
     val issueWidth: Int = 2,
     val enableRV32M: Boolean = false,
-    val branchPredInit: Int = 1) extends Module {
+    val branchPredInit: Int = 1,
+    val prefetchInit: Int = 0) extends Module {
   require(xlen == 32, "Current CSRFile implementation targets RV32")
   require(issueWidth >= 1, "issueWidth must be >= 1")
   require(branchPredInit >= 0 && branchPredInit <= 3, "branchPredInit must fit in branchPredCtrl[1:0]")
+  require(prefetchInit >= 0 && prefetchInit <= 7, "prefetchInit must fit in prefetchCtrl[2:0]")
 
   val io = IO(new Bundle {
     // Query/read port (for decode/execute preview).
@@ -57,7 +59,7 @@ class CSRFile(
     val mtimeHi = Output(UInt(xlen.W))
     val branchPredCtrl = Output(UInt(xlen.W))
 
-    // 预取开关：bit0=Next-line, bit1=Stride，送往预取器。
+    // 预取开关：bit0 仅控制 ICache next-line；bit1/bit2 控制 stride/stream。
     val prefetchCtrl = Output(UInt(xlen.W))
   })
 
@@ -65,7 +67,7 @@ class CSRFile(
   val minstret      = RegInit(0.U(64.W))
   val mtime         = RegInit(0.U(64.W))
   val mcountinhibit = RegInit(0.U(xlen.W))
-  val prefetchCtrl  = RegInit(0.U(xlen.W))
+  val prefetchCtrl  = RegInit(prefetchInit.U(xlen.W))
   val branchPredCtrl = RegInit(branchPredInit.U(xlen.W))
 
   // misa：只读。MXL=01（RV32）置于 bit[31:30]，'I'=bit8；含 M 时再置 'M'=bit12。
