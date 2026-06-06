@@ -43,7 +43,7 @@ EOF
   export PATH="$MAKE_WRAP_DIR:$PATH"
 fi
 
-CSV_FIELDS="suite,program,mode,iCacheKB,dCacheKB,iWay,dWay,status,metricSource,cycles,instRetired,IPC,CPI,simCycles,simInstRetired,simIPC,simCPI,icacheStall,dcacheStall,loadUse,branchInsts,branchCorrect,branchMispredicts,wrongPathFlushInsts,icacheHits,icacheMisses,dcacheHits,dcacheMisses,prefetchReqs,prefetchAccepted,prefetchRefills,prefetchUseful"
+CSV_FIELDS="suite,program,bench,mode,iCacheKB,dCacheKB,iWay,dWay,status,metricSource,cycles,instRetired,IPC,CPI,simCycles,simInstRetired,simIPC,simCPI,icacheStall,dcacheStall,loadUse,branchInsts,branchPreds,branchCorrect,branchMispredicts,branchDirectionMispredicts,branchTargetMispredicts,wrongPathFlushInsts,jalrInsts,rasPushes,rasPops,rasPreds,rasCorrect,icacheAccesses,icacheHits,icacheMisses,icacheDemandRefills,dcacheLoads,dcacheStores,dcacheHits,dcacheMisses,dcacheWritebacks,dcacheDemandRefills,prefetchReqs,prefetchAccepted,prefetchDropped,prefetchRefills,prefetchUseful,icachePrefetchReqs,icachePrefetchAccepted,icachePrefetchDropped,icachePrefetchRefills,icachePrefetchUseful,dcachePrefetchReqs,dcachePrefetchAccepted,dcachePrefetchDropped,dcachePrefetchRefills,dcachePrefetchUseful"
 echo "$CSV_FIELDS" > "$SUMMARY_CSV"
 : > "$SUMMARY_TXT"
 
@@ -58,7 +58,7 @@ trap finish_report EXIT
 
 usage() {
   cat <<'EOF'
-Usage: bash tests/run_perf_suite.sh [--quick] [--quick-cache] [--dhrystone] [--coremark] [--prefetch] [--branch] [--cache]
+Usage: bash tests/run_perf_suite.sh [--quick] [--quick-cache] [--dhrystone] [--coremark] [--prefetch] [--branch] [--branch-synth] [--cache] [--cache-synth]
 
 With no option, all suites are run.
 EOF
@@ -137,6 +137,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --branch)
       run_case "branch predictor" "branch_predictor.txt" sbt "testOnly riscv.BranchPredictorDhrystoneSpec"
+      run_case "branch synthetic" "branch_synthetic.txt" sbt "testOnly riscv.BranchPredictorSyntheticSpec"
+      ;;
+    --branch-synth)
+      run_case "branch synthetic" "branch_synthetic.txt" sbt "testOnly riscv.BranchPredictorSyntheticSpec"
       ;;
     --cache)
       run_case "cache 4KB" "cache_4kb.txt" sbt "testOnly riscv.CacheSizeDhrystoneSpec -- -z 4KB"
@@ -145,6 +149,10 @@ while [[ $# -gt 0 ]]; do
       run_case "cache 32KB" "cache_32kb.txt" sbt "testOnly riscv.CacheSizeDhrystoneSpec -- -z 32KB"
       run_case "cache I32_D16" "cache_i32_d16.txt" sbt "testOnly riscv.CacheSizeDhrystoneSpec -- -z I32_D16"
       run_case "cache I16_D32" "cache_i16_d32.txt" sbt "testOnly riscv.CacheSizeDhrystoneSpec -- -z I16_D32"
+      run_case "cache synthetic" "cache_synthetic.txt" sbt "testOnly riscv.CacheSizeSyntheticSpec"
+      ;;
+    --cache-synth)
+      run_case "cache synthetic" "cache_synthetic.txt" sbt "testOnly riscv.CacheSizeSyntheticSpec"
       ;;
     -h|--help)
       usage
