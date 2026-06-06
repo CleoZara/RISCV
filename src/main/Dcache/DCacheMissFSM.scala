@@ -28,6 +28,8 @@ class DCacheMissFSMIO(p: CacheParams) extends Bundle {
   val refillTag   = Output(UInt(p.TAG_W.W))
   val refillDone  = Output(Bool())
   val refillIsStore = Output(Bool())
+  val refillIsPrefetch = Output(Bool())
+  val writeback    = Output(Bool())
 
   val stall       = Output(Bool())
   val isIdle      = Output(Bool())
@@ -113,6 +115,8 @@ class DCacheMissFSM(p: CacheParams) extends Module {
   io.refillTag    := missTag
   io.refillDone   := state === sDone
   io.refillIsStore := isStore
+  io.refillIsPrefetch := isPrefetch
+  io.writeback    := state === sWbReq && io.mem.req.fire
   io.stall        := state =/= sIdle && !isPrefetch
   io.isIdle       := state === sIdle
   io.arrayWriteBusy := isPrefetch && (state === sRefillWrite || state === sDone)

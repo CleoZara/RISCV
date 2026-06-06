@@ -30,6 +30,7 @@ class DCacheTop(p: CacheParams) extends Module {
     val pfReqAddr  = Input(UInt(p.ADDR_WIDTH.W))
 
     val mem = new MemBusIO(p)
+    val perf = Output(new DCachePerfEvents)
   })
 
   require(p.ADDR_WIDTH >= 22, "DCacheTop expects at least 22-bit physical addresses")
@@ -159,6 +160,35 @@ class DCacheTop(p: CacheParams) extends Module {
   missFsm.io.evictLine   := dataArray.io.evictLine
   io.pfReqReady := missFsm.io.isIdle && !demandReq
 
+  // ── 预取 useful 统计标记 ─────────────────────────────────────
+  val prefetched = RegInit(VecInit(Seq.fill(p.SET_NUM)(
+    VecInit(Seq.fill(p.WAY_NUM)(false.B))
+  )))
+  val demandLookup = demandReq && missFsm.io.isIdle && !queryPrefetch
+  val demandHit = demandLookup && isHit
+  val demandMiss = demandLookup && cacheMiss
+  val prefetchUseful = demandHit && prefetched(addrIdx)(hitWay)
+  val prefetchDropped = (io.pfReqValid && pfIsBypass) ||
+                        (queryPrefetch && hitTest.io.isHit)
+
+  when(io.flush) {
+    for (s <- 0 until p.SET_NUM) {
+      for (w <- 0 until p.WAY_NUM) {
+        prefetched(s)(w) := false.B
+      }
+    }
+  }.otherwise {
+    when(prefetchUseful) {
+      prefetched(addrIdx)(hitWay) := false.B
+    }
+    when(missFsm.io.refillDone && !missFsm.io.refillIsPrefetch) {
+      prefetched(missFsm.io.refillIdx)(missFsm.io.refillWay) := false.B
+    }
+    when(missFsm.io.refillDone && missFsm.io.refillIsPrefetch) {
+      prefetched(missFsm.io.refillIdx)(missFsm.io.refillWay) := true.B
+    }
+  }
+
   io.mem <> missFsm.io.mem
 
   io.printChar.valid := isPrintf
@@ -174,4 +204,16 @@ class DCacheTop(p: CacheParams) extends Module {
   val topStall = cacheMiss || missFsm.io.stall || (missFsm.io.arrayWriteBusy && demandReq)
   io.missOut := topStall
   io.stall   := topStall
+
+  io.perf.load             := demandLookup && io.memRen
+  io.perf.store            := demandLookup && io.wen
+  io.perf.hit              := demandHit
+  io.perf.miss             := demandMiss
+  io.perf.writeback        := missFsm.io.writeback
+  io.perf.demandRefill     := missFsm.io.refillDone && !missFsm.io.refillIsPrefetch
+  io.perf.prefetchReq      := io.pfReqValid
+  io.perf.prefetchAccepted := pfMiss
+  io.perf.prefetchDropped  := prefetchDropped
+  io.perf.prefetchRefill   := missFsm.io.refillDone && missFsm.io.refillIsPrefetch
+  io.perf.prefetchUseful   := prefetchUseful
 }

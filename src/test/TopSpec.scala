@@ -46,7 +46,7 @@ class TopSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
     f.getAbsolutePath
   }
 
-  case class SimResult(success: Boolean, output: String, cycles: Int)
+  case class SimResult(success: Boolean, output: String, cycles: Int, perf: PerfSnapshot)
 
   /** Step the Verilator simulation until io.success rises or maxCycles expires. */
   private def runSim(initFile: String,
@@ -54,6 +54,7 @@ class TopSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
                      verbose: Boolean = false): SimResult = {
     var success = false; var cycles = 0
     val output  = new StringBuilder
+    var perf = PerfSnapshot.zero
     var outputTruncated = false
     val runDir = s"test_run_dir_${System.currentTimeMillis()}_${math.abs(initFile.hashCode)}"
     test(new SimTop(initFile))
@@ -75,9 +76,10 @@ class TopSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
             }
           }
         }
+        perf = PerfSnapshot.from(dut.io.perf)
         if (verbose) println(s"\n[sim] ${if (success) "OK" else "TIMEOUT"} in $cycles cycles")
       }
-    SimResult(success, output.toString, cycles)
+    SimResult(success, output.toString, cycles, perf)
   }
 
   // ── Machine-code programs ────────────────────────────────────────────────
@@ -321,6 +323,7 @@ class TopSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
 
   it should "complete the smoke test (ALU + branch + success MMIO)" in {
     val result = runSim(writeHex("smoke.hex", smokeProg), verbose = true)
+    println(PerfPrinter.line("perf-smoke", PerfPrinter.common(if (result.success) "OK" else "TIMEOUT", "smoke", result.perf)))
     withClue(s"cycles=${result.cycles}") { result.success shouldBe true }
   }
 

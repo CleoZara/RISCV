@@ -209,6 +209,50 @@ class InOrderCore(
   val perfExRedirect = RegInit(0.U(64.W))
   val perfRasPush = RegInit(0.U(64.W))
   val perfRasPop = RegInit(0.U(64.W))
+  val perfBranchInsts = RegInit(0.U(64.W))
+  val perfBranchPreds = RegInit(0.U(64.W))
+  val perfBranchCorrect = RegInit(0.U(64.W))
+  val perfBranchMispredicts = RegInit(0.U(64.W))
+  val perfBranchDirectionMispredicts = RegInit(0.U(64.W))
+  val perfBranchTargetMispredicts = RegInit(0.U(64.W))
+  val perfWrongPathFlushInsts = RegInit(0.U(64.W))
+  val perfJalrInsts = RegInit(0.U(64.W))
+  val perfRasPreds = RegInit(0.U(64.W))
+  val perfRasCorrect = RegInit(0.U(64.W))
+  val perfICacheAccesses = RegInit(0.U(64.W))
+  val perfICacheHits = RegInit(0.U(64.W))
+  val perfICacheMisses = RegInit(0.U(64.W))
+  val perfICacheDemandRefills = RegInit(0.U(64.W))
+  val perfICachePrefetchReqs = RegInit(0.U(64.W))
+  val perfICachePrefetchAccepted = RegInit(0.U(64.W))
+  val perfICachePrefetchDropped = RegInit(0.U(64.W))
+  val perfICachePrefetchRefills = RegInit(0.U(64.W))
+  val perfICachePrefetchUseful = RegInit(0.U(64.W))
+  val perfDCacheLoads = RegInit(0.U(64.W))
+  val perfDCacheStores = RegInit(0.U(64.W))
+  val perfDCacheHits = RegInit(0.U(64.W))
+  val perfDCacheMisses = RegInit(0.U(64.W))
+  val perfDCacheWritebacks = RegInit(0.U(64.W))
+  val perfDCacheDemandRefills = RegInit(0.U(64.W))
+  val perfDCachePrefetchReqs = RegInit(0.U(64.W))
+  val perfDCachePrefetchAccepted = RegInit(0.U(64.W))
+  val perfDCachePrefetchDropped = RegInit(0.U(64.W))
+  val perfDCachePrefetchRefills = RegInit(0.U(64.W))
+  val perfDCachePrefetchUseful = RegInit(0.U(64.W))
+
+  private def countBools(xs: Seq[Bool]): UInt = PopCount(VecInit(xs))
+  val exPerfActive = !hazard.io.stallEX
+  val branchInstInc = countBools(exStage.io.branchInst.map(_ && exPerfActive))
+  val branchPredInc = countBools(exStage.io.branchPred.map(_ && exPerfActive))
+  val branchCorrectInc = countBools(exStage.io.branchCorrect.map(_ && exPerfActive))
+  val branchMispredictInc = countBools(exStage.io.branchMispredict.map(_ && exPerfActive))
+  val branchDirectionMispredictInc = countBools(exStage.io.branchDirectionMispredict.map(_ && exPerfActive))
+  val branchTargetMispredictInc = countBools(exStage.io.branchTargetMispredict.map(_ && exPerfActive))
+  val jalrInstInc = countBools(exStage.io.jalrInst.map(_ && exPerfActive))
+  val rasPredInc = countBools(exStage.io.rasPred.map(_ && exPerfActive))
+  val rasCorrectInc = countBools(exStage.io.rasCorrect.map(_ && exPerfActive))
+  val wrongPathFlushInc = countBools(ifidReg.map(s => s.ctrl.valid && !s.ctrl.kill)) +
+                          countBools(idexReg.map(s => s.ctrl.valid && !s.ctrl.kill))
 
   perfCycles := perfCycles + 1.U
   when(retireCount === 0.U) { perfRetire0 := perfRetire0 + 1.U }
@@ -222,6 +266,38 @@ class InOrderCore(
   when(exStage.io.exRedirectValid) { perfExRedirect := perfExRedirect + 1.U }
   when(idStage.io.rasPush) { perfRasPush := perfRasPush + 1.U }
   when(idStage.io.rasPop) { perfRasPop := perfRasPop + 1.U }
+  perfBranchInsts := perfBranchInsts + branchInstInc
+  perfBranchPreds := perfBranchPreds + branchPredInc
+  perfBranchCorrect := perfBranchCorrect + branchCorrectInc
+  perfBranchMispredicts := perfBranchMispredicts + branchMispredictInc
+  perfBranchDirectionMispredicts := perfBranchDirectionMispredicts + branchDirectionMispredictInc
+  perfBranchTargetMispredicts := perfBranchTargetMispredicts + branchTargetMispredictInc
+  when(idStage.io.idRedirectValid || exStage.io.exRedirectValid) {
+    perfWrongPathFlushInsts := perfWrongPathFlushInsts + wrongPathFlushInc
+  }
+  perfJalrInsts := perfJalrInsts + jalrInstInc
+  perfRasPreds := perfRasPreds + rasPredInc
+  perfRasCorrect := perfRasCorrect + rasCorrectInc
+  when(ifStage.io.icachePerf.access) { perfICacheAccesses := perfICacheAccesses + 1.U }
+  when(ifStage.io.icachePerf.hit) { perfICacheHits := perfICacheHits + 1.U }
+  when(ifStage.io.icachePerf.miss) { perfICacheMisses := perfICacheMisses + 1.U }
+  when(ifStage.io.icachePerf.demandRefill) { perfICacheDemandRefills := perfICacheDemandRefills + 1.U }
+  when(ifStage.io.icachePerf.prefetchReq) { perfICachePrefetchReqs := perfICachePrefetchReqs + 1.U }
+  when(ifStage.io.icachePerf.prefetchAccepted) { perfICachePrefetchAccepted := perfICachePrefetchAccepted + 1.U }
+  when(ifStage.io.icachePerf.prefetchDropped) { perfICachePrefetchDropped := perfICachePrefetchDropped + 1.U }
+  when(ifStage.io.icachePerf.prefetchRefill) { perfICachePrefetchRefills := perfICachePrefetchRefills + 1.U }
+  when(ifStage.io.icachePerf.prefetchUseful) { perfICachePrefetchUseful := perfICachePrefetchUseful + 1.U }
+  when(memStage.io.dcachePerf.load) { perfDCacheLoads := perfDCacheLoads + 1.U }
+  when(memStage.io.dcachePerf.store) { perfDCacheStores := perfDCacheStores + 1.U }
+  when(memStage.io.dcachePerf.hit) { perfDCacheHits := perfDCacheHits + 1.U }
+  when(memStage.io.dcachePerf.miss) { perfDCacheMisses := perfDCacheMisses + 1.U }
+  when(memStage.io.dcachePerf.writeback) { perfDCacheWritebacks := perfDCacheWritebacks + 1.U }
+  when(memStage.io.dcachePerf.demandRefill) { perfDCacheDemandRefills := perfDCacheDemandRefills + 1.U }
+  when(memStage.io.dcachePerf.prefetchReq) { perfDCachePrefetchReqs := perfDCachePrefetchReqs + 1.U }
+  when(memStage.io.dcachePerf.prefetchAccepted) { perfDCachePrefetchAccepted := perfDCachePrefetchAccepted + 1.U }
+  when(memStage.io.dcachePerf.prefetchDropped) { perfDCachePrefetchDropped := perfDCachePrefetchDropped + 1.U }
+  when(memStage.io.dcachePerf.prefetchRefill) { perfDCachePrefetchRefills := perfDCachePrefetchRefills + 1.U }
+  when(memStage.io.dcachePerf.prefetchUseful) { perfDCachePrefetchUseful := perfDCachePrefetchUseful + 1.U }
 
   io.perf.cycles            := perfCycles
   io.perf.retire0Cycles     := perfRetire0
@@ -235,6 +311,36 @@ class InOrderCore(
   io.perf.exRedirects       := perfExRedirect
   io.perf.rasPushes         := perfRasPush
   io.perf.rasPops           := perfRasPop
+  io.perf.branchInsts       := perfBranchInsts
+  io.perf.branchPreds       := perfBranchPreds
+  io.perf.branchCorrect     := perfBranchCorrect
+  io.perf.branchMispredicts := perfBranchMispredicts
+  io.perf.branchDirectionMispredicts := perfBranchDirectionMispredicts
+  io.perf.branchTargetMispredicts    := perfBranchTargetMispredicts
+  io.perf.wrongPathFlushInsts        := perfWrongPathFlushInsts
+  io.perf.jalrInsts         := perfJalrInsts
+  io.perf.rasPreds          := perfRasPreds
+  io.perf.rasCorrect        := perfRasCorrect
+  io.perf.icacheAccesses    := perfICacheAccesses
+  io.perf.icacheHits        := perfICacheHits
+  io.perf.icacheMisses      := perfICacheMisses
+  io.perf.icacheDemandRefills       := perfICacheDemandRefills
+  io.perf.icachePrefetchReqs        := perfICachePrefetchReqs
+  io.perf.icachePrefetchAccepted    := perfICachePrefetchAccepted
+  io.perf.icachePrefetchDropped     := perfICachePrefetchDropped
+  io.perf.icachePrefetchRefills     := perfICachePrefetchRefills
+  io.perf.icachePrefetchUseful      := perfICachePrefetchUseful
+  io.perf.dcacheLoads       := perfDCacheLoads
+  io.perf.dcacheStores      := perfDCacheStores
+  io.perf.dcacheHits        := perfDCacheHits
+  io.perf.dcacheMisses      := perfDCacheMisses
+  io.perf.dcacheWritebacks  := perfDCacheWritebacks
+  io.perf.dcacheDemandRefills       := perfDCacheDemandRefills
+  io.perf.dcachePrefetchReqs        := perfDCachePrefetchReqs
+  io.perf.dcachePrefetchAccepted    := perfDCachePrefetchAccepted
+  io.perf.dcachePrefetchDropped     := perfDCachePrefetchDropped
+  io.perf.dcachePrefetchRefills     := perfDCachePrefetchRefills
+  io.perf.dcachePrefetchUseful      := perfDCachePrefetchUseful
 
   when(hazard.io.flushIF) {
     ifidReg := VecInit(Seq.fill(issueWidth)(0.U.asTypeOf(new IFIDSlot)))

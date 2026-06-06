@@ -26,6 +26,16 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     val exRedirectValid = Output(Bool())
     val exRedirectPc    = Output(UInt(32.W))
 
+    val branchInst       = Output(Vec(issueWidth, Bool()))
+    val branchPred       = Output(Vec(issueWidth, Bool()))
+    val branchCorrect    = Output(Vec(issueWidth, Bool()))
+    val branchMispredict = Output(Vec(issueWidth, Bool()))
+    val branchDirectionMispredict = Output(Vec(issueWidth, Bool()))
+    val branchTargetMispredict    = Output(Vec(issueWidth, Bool()))
+    val jalrInst         = Output(Vec(issueWidth, Bool()))
+    val rasPred          = Output(Vec(issueWidth, Bool()))
+    val rasCorrect       = Output(Vec(issueWidth, Bool()))
+
     val bpuUpdateValid  = Output(Bool())
     val bpuUpdatePc     = Output(UInt(32.W))
     val bpuUpdateTaken  = Output(Bool())
@@ -69,6 +79,7 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
 
     val fallThrough = io.in(i).pc + 4.U
     val isBranch    = io.in(i).brType =/= BrType.BR_NONE
+    val isControl   = isBranch || io.in(i).isJump || io.in(i).isJalr
     val forwardData = MuxLookup(io.in(i).wbSel, alus(i).io.result, Seq(
       WbSel.WB_ALU -> alus(i).io.result,
       WbSel.WB_PC4 -> fallThrough,
@@ -80,6 +91,16 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
       io.in(i).isJalr          -> jalrTarget(i),
       (isBranch && branchTaken(i)) -> branchTarget(i)
     ))
+    val actualControlNextPc = MuxCase(fallThrough, Seq(
+      io.in(i).isJalr -> jalrTarget(i),
+      (io.in(i).isJump && !io.in(i).isJalr) -> branchTarget(i),
+      (isBranch && branchTaken(i)) -> branchTarget(i)
+    ))
+    val predCorrect = actualControlNextPc === io.in(i).predNextPc
+    val predRedirect = io.in(i).predNextPc =/= fallThrough
+    val actualRedirect = actualControlNextPc =/= fallThrough
+    val directionMiss = predRedirect =/= actualRedirect
+    val targetMiss = !directionMiss && predRedirect && actualRedirect && !predCorrect
 
     val killedByOlderRedirect = if (i == 0) false.B else redirect(0)
     val slotLive = slotValid(i) && !killedByOlderRedirect
@@ -87,6 +108,16 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     redirect(i) := slotLive &&
                    (isBranch || io.in(i).isJalr) &&
                    (actualNextPc(i) =/= io.in(i).predNextPc)
+
+    io.branchInst(i)       := slotLive && isControl
+    io.branchPred(i)       := slotLive && isControl
+    io.branchCorrect(i)    := slotLive && isControl && predCorrect
+    io.branchMispredict(i) := slotLive && isControl && !predCorrect
+    io.branchDirectionMispredict(i) := slotLive && isControl && directionMiss
+    io.branchTargetMispredict(i)    := slotLive && isControl && targetMiss
+    io.jalrInst(i)         := slotLive && io.in(i).isJalr
+    io.rasPred(i)          := slotLive && io.in(i).rasPred
+    io.rasCorrect(i)       := slotLive && io.in(i).rasPred && predCorrect
 
     io.exValid(i)  := slotLive
     io.exMemRen(i) := slotLive && io.in(i).memRen

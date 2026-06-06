@@ -10,8 +10,8 @@ import java.io.{File, PrintWriter}
 class PrefetchSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   behavior of "Prefetch controller CSR 0x7C0"
 
-  private case class SimResult(success: Boolean, output: String, cycles: Int)
-  private case class BenchResult(name: String, mode: Int, cycles: Int)
+  private case class SimResult(success: Boolean, output: String, cycles: Int, perf: PerfSnapshot)
+  private case class BenchResult(name: String, mode: Int, cycles: Int, perf: PerfSnapshot)
 
   private val modes = Seq(
     (0, "none"),
@@ -51,6 +51,7 @@ class PrefetchSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
     val output = new StringBuilder
     val label = new File(initFile).getName.stripSuffix(".hex")
     val runDir = s"prefetch_${label}_${System.currentTimeMillis()}"
+    var perf = PerfSnapshot.zero
 
     test(new SimTop(initFile))
       .withAnnotations(Seq(VerilatorBackendAnnotation, TargetDirAnnotation(runDir))) { dut =>
@@ -65,9 +66,10 @@ class PrefetchSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             output.append(dut.io.printChar.bits.peekInt().toChar)
           }
         }
+        perf = PerfSnapshot.from(dut.io.perf)
       }
 
-    SimResult(success, output.toString, cycles)
+    SimResult(success, output.toString, cycles, perf)
   }
 
   private def addi(rd: Int, rs1: Int, imm: Int): Long =
@@ -163,7 +165,13 @@ class PrefetchSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
       withClue(s"$label mode=$mode ($name) output='${r.output}' cycles=${r.cycles}") {
         r.success shouldBe true
       }
-      val res = BenchResult(name, mode, r.cycles)
+      val res = BenchResult(name, mode, r.cycles, r.perf)
+      println(PerfPrinter.line(
+        "perf-prefetch",
+        PerfPrinter.common(if (r.success) "OK" else "TIMEOUT", prefix, r.perf) ++ Seq(
+          "mode" -> name,
+          "bench" -> label,
+          "simCycles" -> r.cycles)))
       info(f"  mode=$mode%-2d ($name%-9s) cycles=${r.cycles}%9d")
       res
     }

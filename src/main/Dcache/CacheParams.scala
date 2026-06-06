@@ -46,3 +46,29 @@ object CacheParams {
     LINE_BYTES = 64
   )
 }
+
+class ICachePerfEvents extends Bundle {
+  val access           = Bool()
+  val hit              = Bool()
+  val miss             = Bool()
+  val demandRefill     = Bool()
+  val prefetchReq      = Bool()
+  val prefetchAccepted = Bool()
+  val prefetchDropped  = Bool()
+  val prefetchRefill   = Bool()
+  val prefetchUseful   = Bool()
+}
+
+class DCachePerfEvents extends Bundle {
+  val load             = Bool()
+  val store            = Bool()
+  val hit              = Bool()
+  val miss             = Bool()
+  val writeback        = Bool()
+  val demandRefill     = Bool()
+  val prefetchReq      = Bool()
+  val prefetchAccepted = Bool()
+  val prefetchDropped  = Bool()
+  val prefetchRefill   = Bool()
+  val prefetchUseful   = Bool()
+}

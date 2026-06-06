@@ -2,7 +2,7 @@ package icache
 
 import chisel3._
 import chisel3.util._
-import parameterized_cache.{CacheParams, MemBusIO}
+import parameterized_cache.{CacheParams, ICachePerfEvents, MemBusIO}
 import parameterized_cache.TreePLRU
 
 // ============================================================
@@ -61,6 +61,9 @@ class ICacheTop(p: CacheParams) extends Module {
 
     // ── 外部内存总线 ──────────────────────────────────────────
     val mem = new MemBusIO(p)
+
+    // ── 性能事件（单周期脉冲，仅用于统计）─────────────────────
+    val perf = Output(new ICachePerfEvents)
   })
 
   // ── 地址分解 ──────────────────────────────────────────────────
@@ -160,6 +163,33 @@ class ICacheTop(p: CacheParams) extends Module {
   // 内存总线直连
   io.mem <> missFsm.io.mem
 
+  // ── 预取 useful 统计标记 ─────────────────────────────────────
+  val prefetched = RegInit(VecInit(Seq.fill(p.SET_NUM)(
+    VecInit(Seq.fill(p.WAY_NUM)(false.B))
+  )))
+  val demandLookup = io.valid && !io.flush
+  val demandHit = demandLookup && isHit
+  val demandMiss = demandLookup && hitTest.io.missValid && missFsm.io.isIdle
+  val prefetchUseful = demandHit && prefetched(addrIdx)(hitWay)
+
+  when(io.flush) {
+    for (s <- 0 until p.SET_NUM) {
+      for (w <- 0 until p.WAY_NUM) {
+        prefetched(s)(w) := false.B
+      }
+    }
+  }.otherwise {
+    when(prefetchUseful) {
+      prefetched(addrIdx)(hitWay) := false.B
+    }
+    when(missFsm.io.refillDone) {
+      prefetched(missFsm.io.refillIdx)(missFsm.io.refillWay) := false.B
+    }
+    when(missFsm.io.prefillDone) {
+      prefetched(missFsm.io.refillIdx)(missFsm.io.refillWay) := true.B
+    }
+  }
+
   // ── 对外输出 ──────────────────────────────────────────────────
   io.insts(0)      := instSel.io.inst0
   io.insts(1)      := instSel.io.inst1
@@ -174,6 +204,16 @@ class ICacheTop(p: CacheParams) extends Module {
   //   - missFsm.io.stall：FSM 正在处理 miss（sRefillReq/Resp/sDone）
   // 两者 OR 覆盖 miss 的完整生命周期
   io.missOut := hitTest.io.missValid || missFsm.io.stall
+
+  io.perf.access           := demandHit || demandMiss
+  io.perf.hit              := demandHit
+  io.perf.miss             := demandMiss
+  io.perf.demandRefill     := missFsm.io.refillDone
+  io.perf.prefetchReq      := io.pfReqValid
+  io.perf.prefetchAccepted := io.pfReqValid && missFsm.io.pfReqReady
+  io.perf.prefetchDropped  := io.pfReqValid && !missFsm.io.pfReqReady
+  io.perf.prefetchRefill   := missFsm.io.prefillDone
+  io.perf.prefetchUseful   := prefetchUseful
 }
 
 // ============================================================

@@ -28,12 +28,7 @@ class PrefetchDhrystoneSpec extends AnyFlatSpec with ChiselScalatestTester with 
     val output = new StringBuilder
     val maxCycles = 500000
     val runDir = s"target/dhrystone_prefetch_${mode.name.replace("-", "_")}_${System.currentTimeMillis()}"
-    var perfCycles = BigInt(0)
-    var perfInstRetired = BigInt(0)
-    var iStall = BigInt(0)
-    var dStall = BigInt(0)
-    var loadUse = BigInt(0)
-    var exRedirect = BigInt(0)
+    var perf = PerfSnapshot.zero
 
     test(new SimTop(f.getAbsolutePath, prefetchInit = mode.value))
       .withAnnotations(Seq(VerilatorBackendAnnotation, TargetDirAnnotation(runDir))) { dut =>
@@ -49,30 +44,21 @@ class PrefetchDhrystoneSpec extends AnyFlatSpec with ChiselScalatestTester with 
           }
         }
 
-        perfCycles = dut.io.perf.cycles.peekInt()
-        perfInstRetired = dut.io.perf.instRetired.peekInt()
-        iStall = dut.io.perf.icacheStallCycles.peekInt()
-        dStall = dut.io.perf.dcacheStallCycles.peekInt()
-        loadUse = dut.io.perf.loadUseStalls.peekInt()
-        exRedirect = dut.io.perf.exRedirects.peekInt()
+        perf = PerfSnapshot.from(dut.io.perf)
       }
 
     val out = output.toString
-    val dhryCycles = "Cycles spent for 10 iterations dhrystone:\\s*(\\d+)".r
-      .findFirstMatchIn(out).map(_.group(1)).getOrElse("0")
-    val dhryInstRetired = "Instructions retired for 10 iterations dhrystone:\\s*(\\d+)".r
-      .findFirstMatchIn(out).map(_.group(1)).getOrElse("0")
-    val dhryIpc =
-      if (BigInt(dhryCycles) != 0) BigDecimal(BigInt(dhryInstRetired)) / BigDecimal(BigInt(dhryCycles))
-      else BigDecimal(0)
-    val cpi =
-      if (perfInstRetired != 0) BigDecimal(perfCycles) / BigDecimal(perfInstRetired)
-      else BigDecimal(0)
+    val (dhryCycles, dhryInstRetired) = PerfPrinter.dhrystoneMetrics(out).getOrElse((BigInt(0), BigInt(0)))
+    val dhryIpc = PerfPrinter.ratio(dhryInstRetired, dhryCycles)
 
-    println(
-      f"[prefetch-${mode.name}] cycles=$perfCycles instret=$perfInstRetired cpi=$cpi%.4f " +
-      s"istall=$iStall dstall=$dStall loadUse=$loadUse exRedirect=$exRedirect")
-    println(f"[prefetch-${mode.name}-dhry] cycles=$dhryCycles instret=$dhryInstRetired ipc=$dhryIpc%.4f")
+    println(PerfPrinter.line(
+      "perf-prefetch",
+      PerfPrinter.commonDhrystone(if (success) "OK" else "TIMEOUT", perf, out) ++ Seq(
+        "mode" -> mode.name,
+        "dhryCycles" -> dhryCycles,
+        "dhryInstRetired" -> dhryInstRetired,
+        "dhryIPC" -> dhryIpc)))
+    println(s"[prefetch-${mode.name}-dhry] cycles=$dhryCycles instret=$dhryInstRetired ipc=$dhryIpc")
 
     withClue(out) {
       success shouldBe true

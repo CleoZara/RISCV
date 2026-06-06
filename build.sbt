@@ -17,9 +17,15 @@ lazy val root = (project in file("."))
     ),
     Compile / unmanagedSourceDirectories := Seq(baseDirectory.value / "src" / "main"),
     Compile / unmanagedSources := (Compile / unmanagedSources).value.filterNot { f =>
-      f.getPath.replace('\\', '/').endsWith("src/main/Icache/ICacheMissFSM.scala")
+      val path = f.getPath.replace('\\', '/')
+      path.endsWith("src/main/Icache/ICacheMissFSM.scala") ||
+      path.endsWith("/PrefetchSpec.scala")
     },
     Test / unmanagedSourceDirectories := Seq(baseDirectory.value / "src" / "test"),
+    Test / unmanagedSources := (Test / unmanagedSources).value.filterNot { f =>
+      val path = f.getPath.replace('\\', '/')
+      path.endsWith("/PrefetchSpec.scala") && !path.contains("/src/test/")
+    },
     addCompilerPlugin(
       "edu.berkeley.cs" % "chisel3-plugin" % "3.5.6" cross CrossVersion.full
     ),

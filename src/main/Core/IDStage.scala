@@ -197,6 +197,7 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
     io.out(i).predTarget := eff(i).predTarget
     io.out(i).predNextPc := eff(i).predNextPc
     io.out(i).seqNextPc  := eff(i).seqNextPc
+    io.out(i).rasPred    := eff(i).rasPred
     io.out(i).csrRdata   := io.csrRdata
     io.out(i).ctrl.valid   := issue
     io.out(i).ctrl.kill    := io.flushId || eff(i).ctrl.kill

@@ -3,7 +3,7 @@ package riscv
 import chisel3._
 import chisel3.util._
 import icache.ICacheTop
-import parameterized_cache.{CacheParams, MemBusIO}
+import parameterized_cache.{CacheParams, ICachePerfEvents, MemBusIO}
 
 class IFStage(p: CacheParams = CacheParams.default) extends Module {
   val issueWidth = 2
@@ -29,6 +29,7 @@ class IFStage(p: CacheParams = CacheParams.default) extends Module {
 
     val out = Output(Vec(issueWidth, new IFIDSlot))
     val icacheStall = Output(Bool())
+    val icachePerf = Output(new ICachePerfEvents)
     val imem = new MemBusIO(p)
     val debugPc = Output(UInt(32.W))
   })
@@ -126,6 +127,7 @@ class IFStage(p: CacheParams = CacheParams.default) extends Module {
       Mux(slotRet, io.rasPredTarget, io.bpuPredTarget))
     io.out(i).predNextPc := slotPredNextPc
     io.out(i).seqNextPc := seqNextPc
+    io.out(i).rasPred := slotRet
     io.out(i).icacheHit := icache.io.respValid
     io.out(i).ctrl.valid := icache.io.instValids(i) && !io.flushIf
     io.out(i).ctrl.kill := io.flushIf
@@ -133,4 +135,5 @@ class IFStage(p: CacheParams = CacheParams.default) extends Module {
   }
 
   io.icacheStall := icache.io.missOut
+  io.icachePerf := icache.io.perf
 }

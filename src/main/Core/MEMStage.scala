@@ -2,7 +2,7 @@ package riscv
 
 import chisel3._
 import chisel3.util._
-import parameterized_cache.{CacheParams, DCacheTop, MemBusIO}
+import parameterized_cache.{CacheParams, DCachePerfEvents, DCacheTop, MemBusIO}
 
 class MEMStage(p: CacheParams = CacheParams.default) extends Module {
   val issueWidth = 2
@@ -17,6 +17,7 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
     val stridePrefetchEn = Input(Bool())
     val streamPrefetchEn = Input(Bool())
     val dcacheStall = Output(Bool())
+    val dcachePerf  = Output(new DCachePerfEvents)
     val printChar   = Output(Valid(UInt(8.W)))
     // P0 fix: expose success signal for test-completion detection
     val success     = Output(Bool())
@@ -136,6 +137,7 @@ class MEMStage(p: CacheParams = CacheParams.default) extends Module {
   val printBitsReg  = RegEnable(printBits, 0.U(8.W), printFire)
 
   io.dcacheStall := dcacheBusy
+  io.dcachePerf  := dcache.io.perf
   io.printChar.valid := printValidReg
   io.printChar.bits  := printBitsReg
   io.success     := dcache.io.success   // P0 fix
