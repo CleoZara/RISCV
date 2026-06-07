@@ -89,6 +89,8 @@ object AluOp {
   val ALU_DIVU   = 17.U(W.W)
   val ALU_REM    = 18.U(W.W)
   val ALU_REMU   = 19.U(W.W)
+
+  def isMulDiv(op: UInt): Bool = op >= ALU_MUL && op <= ALU_REMU
 }
 
 object Op1Sel {

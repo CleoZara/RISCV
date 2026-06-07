@@ -236,6 +236,8 @@ object AluOp {
   val ALU_DIVU   = 17.U(W.W)
   val ALU_REM    = 18.U(W.W)
   val ALU_REMU   = 19.U(W.W)
+
+  def isMulDiv(op: UInt): Bool = op >= ALU_MUL && op <= ALU_REMU
 }
 
 object Op1Sel {
@@ -729,7 +731,8 @@ class PipelineBypassUnit(issueWidth: Int = 2) extends Module {
     network.io.intraEx(i).rdAddr := io.idex(i).rdAddr
     network.io.intraEx(i).data := io.exResult(i)
     network.io.intraEx(i).canForward :=
-      io.idex(i).rfWen && !io.idex(i).memRen && (io.idex(i).wbSel =/= WbSel.WB_MEM)
+      io.idex(i).rfWen && !io.idex(i).memRen && (io.idex(i).wbSel =/= WbSel.WB_MEM) &&
+        !AluOp.isMulDiv(io.idex(i).aluOp)
 
     network.io.exMem(i).valid := io.exmemValid(i)
     network.io.exMem(i).rfWen := io.exmem(i).rfWen
@@ -1005,12 +1008,15 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     val exRdAddr = Output(Vec(issueWidth, UInt(5.W)))
     val exRfWen  = Output(Vec(issueWidth, Bool()))
     val exResult = Output(Vec(issueWidth, UInt(32.W)))
+    val mulDivStall = Output(Bool())
 
     val out = Output(Vec(issueWidth, new EXMEMBundle))
   })
 
   val alus         = Seq.fill(issueWidth)(Module(new ParamALU(32, enableRV32M)))
+  val mulDivs      = Seq.fill(issueWidth)(Module(new MulDivALU(32)))
   val slotValid    = Wire(Vec(issueWidth, Bool()))
+  val mulDivWaiting = Wire(Vec(issueWidth, Bool()))
   val branchTaken  = Wire(Vec(issueWidth, Bool()))
   val branchTarget = Wire(Vec(issueWidth, UInt(32.W)))  // PC + imm (B/J type)
   val jalrTarget   = Wire(Vec(issueWidth, UInt(32.W)))  // rs1 + imm, lsb cleared
@@ -1023,6 +1029,12 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     alus(i).io.op1   := io.op1Data(i)
     alus(i).io.op2   := io.op2Data(i)
     alus(i).io.aluOp := io.in(i).aluOp
+    mulDivs(i).io.req.bits.op1   := io.op1Data(i)
+    mulDivs(i).io.req.bits.op2   := io.op2Data(i)
+    mulDivs(i).io.req.bits.aluOp := io.in(i).aluOp
+
+    val isMulDivOp = enableRV32M.B && AluOp.isMulDiv(io.in(i).aluOp)
+    val execResult = Mux(isMulDivOp, mulDivs(i).io.resp.bits, alus(i).io.result)
 
     branchTaken(i) := MuxLookup(io.in(i).brType, false.B, Seq(
       BrType.BR_EQ  -> (io.rs1Data(i) === io.rs2Data(i)),
@@ -1039,11 +1051,11 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     val fallThrough = io.in(i).pc + 4.U
     val isBranch    = io.in(i).brType =/= BrType.BR_NONE
     val isControl   = isBranch || io.in(i).isJump || io.in(i).isJalr
-    val forwardData = MuxLookup(io.in(i).wbSel, alus(i).io.result, Seq(
-      WbSel.WB_ALU -> alus(i).io.result,
+    val forwardData = MuxLookup(io.in(i).wbSel, execResult, Seq(
+      WbSel.WB_ALU -> execResult,
       WbSel.WB_PC4 -> fallThrough,
       WbSel.WB_CSR -> io.csrOldData,
-      WbSel.WB_MEM -> alus(i).io.result
+      WbSel.WB_MEM -> execResult
     ))
 
     actualNextPc(i) := MuxCase(fallThrough, Seq(
@@ -1063,6 +1075,11 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
 
     val killedByOlderRedirect = if (i == 0) false.B else redirect(0)
     val slotLive = slotValid(i) && !killedByOlderRedirect
+    val mulDivCancel = io.flushEx || killedByOlderRedirect
+    mulDivs(i).io.cancel := mulDivCancel
+    mulDivs(i).io.req.valid := slotLive && isMulDivOp && !io.flushEx
+    mulDivs(i).io.resp.ready := !io.stallEx || mulDivCancel
+    mulDivWaiting(i) := slotValid(i) && isMulDivOp && !io.flushEx && !mulDivs(i).io.resp.valid
 
     redirect(i) := slotLive &&
                    (isBranch || io.in(i).isJalr) &&
@@ -1088,7 +1105,7 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     io.out(i).pc        := io.in(i).pc
     io.out(i).inst      := io.in(i).inst
     io.out(i).slotIdx   := io.in(i).slotIdx
-    io.out(i).aluOut    := alus(i).io.result
+    io.out(i).aluOut    := execResult
     io.out(i).rs2Data   := io.storeData(i)
     io.out(i).rdAddr    := io.in(i).rdAddr
     io.out(i).wbSel     := io.in(i).wbSel
@@ -1105,6 +1122,7 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     io.out(i).ctrl.kill    := io.flushEx || io.in(i).ctrl.kill || killedByOlderRedirect
     io.out(i).ctrl.allowIn := true.B
   }
+  io.mulDivStall := mulDivWaiting.asUInt.orR
 
   // ── CSR operation ─────────────────────────────────────────────────────
   val slot0Live = slotValid(0)
@@ -1234,6 +1252,7 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
     dec(0).io.out.rfWen &&
     !dec(0).io.out.memRen &&                           // Load result not available in EX
     (dec(0).io.out.wbSel === WbSel.WB_ALU) &&         // only ALU results are available to F5
+    !AluOp.isMulDiv(dec(0).io.out.aluOp) &&            // RV32M results are multi-cycle
     (dec(0).io.out.rdAddr =/= 0.U)
 
   // ── Slot-1 stall conditions ────────────────────────────────────────────
@@ -1718,7 +1737,7 @@ class InOrderCore(
   hazard.io.idRedirect  := idStage.io.idRedirectValid
   hazard.io.icacheStall := ifStage.io.icacheStall
   hazard.io.dcacheStall := memStage.io.dcacheStall
-  hazard.io.backendStall := false.B
+  hazard.io.backendStall := exStage.io.mulDivStall
 
   // Pipeline register update logic
   val retireCount = PopCount(retireVec)
@@ -3006,7 +3025,6 @@ class ParamALU(val xlen: Int = 32, val enableRV32M: Boolean = false) extends Mod
     val aluOp  = Input(UInt(AluOp.W.W))
     val result = Output(UInt(xlen.W))
 
-    // Compare flags are convenient for branch units.
     val cmpEq  = Output(Bool())
     val cmpLt  = Output(Bool())
     val cmpLtu = Output(Bool())
@@ -3018,7 +3036,6 @@ class ParamALU(val xlen: Int = 32, val enableRV32M: Boolean = false) extends Mod
   io.cmpLt  := io.op1.asSInt < io.op2.asSInt
   io.cmpLtu := io.op1 < io.op2
 
-  // 基础 RV32I ALU 映射
   val baseAluMapping = Seq(
     ALU_ADD   -> (io.op1 + io.op2),
     ALU_SUB   -> (io.op1 - io.op2),
@@ -3034,49 +3051,188 @@ class ParamALU(val xlen: Int = 32, val enableRV32M: Boolean = false) extends Mod
     ALU_COPY1 -> io.op1
   )
 
-  // 动态生成 RV32M ALU 指令映射
-  val rv32mMapping: Seq[(UInt, UInt)] = if (enableRV32M) {
-    // --- 乘法 (Multiplication) ---
-    val mul    = io.op1 * io.op2                                  // 低 32 位相同
-    val mulh   = (io.op1.asSInt * io.op2.asSInt).asUInt           // 有符号 × 有符号
-    val mulhsu = (io.op1.asSInt * Cat(0.U(1.W), io.op2).asSInt).asUInt // 有符号 × 无符号
-    val mulhu  = io.op1 * io.op2                                  // 无符号 × 无符号
+  // RV32M operations are handled by the dedicated multi-cycle MulDivALU.
+  io.result := MuxLookup(io.aluOp, 0.U(xlen.W), baseAluMapping)
+}
+```
 
-    // --- 除法边界条件 ---
-    val divByZero   = io.op2 === 0.U
-    val isIntMin    = io.op1 === Cat(1.U(1.W), 0.U((xlen - 1).W)) // -2^31
-    val isMinusOne  = io.op2.andR                                 // -1
-    val divOverflow = isIntMin && isMinusOne
+## .\src\main\Execute\MulDivALU.scala
 
-    val divResult = Mux(divByZero, (-1.S(xlen.W)).asUInt,
-                    Mux(divOverflow, io.op1,
-                    (io.op1.asSInt / io.op2.asSInt).asUInt))(xlen - 1, 0)
+```scala
+package riscv
 
-    val divuResult = Mux(divByZero, (-1.S(xlen.W)).asUInt,
-                     (io.op1 / io.op2))(xlen - 1, 0)
+import chisel3._
+import chisel3.util._
+import AluOp._
 
-    val remResult = Mux(divByZero, io.op1,
-                    Mux(divOverflow, 0.U(xlen.W),
-                    (io.op1.asSInt % io.op2.asSInt).asUInt))(xlen - 1, 0)
+class MulDivReq(val xlen: Int = 32) extends Bundle {
+  val op1   = UInt(xlen.W)
+  val op2   = UInt(xlen.W)
+  val aluOp = UInt(AluOp.W.W)
+}
 
-    val remuResult = Mux(divByZero, io.op1,
-                     (io.op1 % io.op2))(xlen - 1, 0)
+class MulDivALU(val xlen: Int = 32, val mulLatency: Int = 3, val divLatency: Int = 32)
+    extends Module {
+  require(xlen == 32, "MulDivALU implements RV32M and expects xlen == 32")
+  require(mulLatency >= 1, "mulLatency must be positive")
+  require(divLatency >= 1, "divLatency must be positive")
 
-    Seq(
-      ALU_MUL    -> mul(xlen - 1, 0),
-      ALU_MULH   -> mulh(xlen * 2 - 1, xlen),
-      ALU_MULHSU -> mulhsu(xlen * 2 - 1, xlen),
-      ALU_MULHU  -> mulhu(xlen * 2 - 1, xlen),
-      ALU_DIV    -> divResult,
-      ALU_DIVU   -> divuResult,
-      ALU_REM    -> remResult,
-      ALU_REMU   -> remuResult
-    )
-  } else {
-    Seq()
+  private val latencyWidth = log2Ceil(math.max(mulLatency, divLatency) + 1).max(1)
+
+  val io = IO(new Bundle {
+    val req    = Flipped(Decoupled(new MulDivReq(xlen)))
+    val resp   = Decoupled(UInt(xlen.W))
+    val cancel = Input(Bool())
+    val busy   = Output(Bool())
+  })
+
+  val sIdle :: sBusy :: sDone :: Nil = Enum(3)
+  val state = RegInit(sIdle)
+  val remaining = RegInit(0.U(latencyWidth.W))
+  val resultReg = RegInit(0.U(xlen.W))
+
+  val divActive = RegInit(false.B)
+  val divWantRem = RegInit(false.B)
+  val divQuotNeg = RegInit(false.B)
+  val divRemNeg = RegInit(false.B)
+  val divDividend = RegInit(0.U(xlen.W))
+  val divDivisor = RegInit(0.U(xlen.W))
+  val divQuotient = RegInit(0.U(xlen.W))
+  val divRemainder = RegInit(0.U((xlen + 1).W))
+
+  private def twos(x: UInt): UInt = (~x).asUInt + 1.U
+
+  private def abs32(x: UInt, signed: Bool): UInt = {
+    Mux(signed && x(31), twos(x), x)
   }
 
-  io.result := MuxLookup(io.aluOp, 0.U(xlen.W), baseAluMapping ++ rv32mMapping)
+  private def high32(x: UInt): UInt = x(63, 32)
+
+  private def divStep(
+      dividend: UInt,
+      quotient: UInt,
+      remainder: UInt,
+      divisor: UInt): (UInt, UInt, UInt) = {
+    val shiftedRem = Cat(remainder(31, 0), dividend(31))
+    val divisor33 = Cat(0.U(1.W), divisor)
+    val ge = shiftedRem >= divisor33
+    val nextRem = Mux(ge, shiftedRem - divisor33, shiftedRem)
+    val nextQuot = Cat(quotient(30, 0), ge)
+    val nextDividend = Cat(dividend(30, 0), 0.U(1.W))
+    (nextDividend, nextQuot, nextRem)
+  }
+
+  private def mulResult(op1: UInt, op2: UInt, aluOp: UInt): UInt = {
+    val op1S33 = Cat(op1(31), op1).asSInt
+    val op2S33 = Cat(op2(31), op2).asSInt
+    val op1U33 = Cat(0.U(1.W), op1)
+    val op2U33 = Cat(0.U(1.W), op2)
+
+    val mulSS = (op1S33 * op2S33).asUInt
+    val mulSU = (op1S33 * op2U33.asSInt).asUInt
+    val mulUU = op1 * op2
+
+    MuxLookup(aluOp, mulUU(31, 0), Seq(
+      ALU_MUL    -> mulUU(31, 0),
+      ALU_MULH   -> high32(mulSS),
+      ALU_MULHSU -> high32(mulSU),
+      ALU_MULHU  -> high32(mulUU)
+    ))
+  }
+
+  private def divSpecialResult(op1: UInt, op2: UInt, aluOp: UInt): UInt = {
+    val divByZero = op2 === 0.U
+    val divOverflow = op1 === "h80000000".U && op2 === "hffffffff".U
+    MuxLookup(aluOp, 0.U(xlen.W), Seq(
+      ALU_DIV  -> Mux(divByZero, "hffffffff".U, Mux(divOverflow, op1, 0.U)),
+      ALU_DIVU -> Mux(divByZero, "hffffffff".U, 0.U),
+      ALU_REM  -> Mux(divByZero, op1, Mux(divOverflow, 0.U, 0.U)),
+      ALU_REMU -> Mux(divByZero, op1, 0.U)
+    ))
+  }
+
+  io.req.ready := state === sIdle
+  io.resp.valid := state === sDone
+  io.resp.bits := resultReg
+  io.busy := state =/= sIdle
+
+  val reqOp = io.req.bits.aluOp
+  val reqIsDivRem = reqOp >= ALU_DIV
+  val reqIsRem = reqOp === ALU_REM || reqOp === ALU_REMU
+  val reqIsSignedDiv = reqOp === ALU_DIV || reqOp === ALU_REM
+  val reqDivByZero = io.req.bits.op2 === 0.U
+  val reqDivOverflow = io.req.bits.op1 === "h80000000".U && io.req.bits.op2 === "hffffffff".U
+  val reqDivSpecial = reqDivByZero || reqDivOverflow
+  val reqAbsDividend = abs32(io.req.bits.op1, reqIsSignedDiv)
+  val reqAbsDivisor = abs32(io.req.bits.op2, reqIsSignedDiv)
+  val reqDivQuotNeg = reqIsSignedDiv && (io.req.bits.op1(31) ^ io.req.bits.op2(31))
+  val reqDivRemNeg = reqIsSignedDiv && io.req.bits.op1(31)
+  val firstDiv = divStep(reqAbsDividend, 0.U(xlen.W), 0.U((xlen + 1).W), reqAbsDivisor)
+
+  when(io.cancel) {
+    state := sIdle
+    remaining := 0.U
+    divActive := false.B
+  }.otherwise {
+    switch(state) {
+      is(sIdle) {
+        when(io.req.fire) {
+          when(reqIsDivRem) {
+            resultReg := divSpecialResult(io.req.bits.op1, io.req.bits.op2, reqOp)
+            divActive := !reqDivSpecial
+            divWantRem := reqIsRem
+            divQuotNeg := reqDivQuotNeg
+            divRemNeg := reqDivRemNeg
+            divDividend := firstDiv._1
+            divQuotient := firstDiv._2
+            divRemainder := firstDiv._3
+            divDivisor := reqAbsDivisor
+            when(divLatency.U === 1.U) {
+              state := sDone
+            }.otherwise {
+              remaining := (divLatency - 1).U
+              state := sBusy
+            }
+          }.otherwise {
+            resultReg := mulResult(io.req.bits.op1, io.req.bits.op2, reqOp)
+            divActive := false.B
+            when(mulLatency.U === 1.U) {
+              state := sDone
+            }.otherwise {
+              remaining := (mulLatency - 1).U
+              state := sBusy
+            }
+          }
+        }
+      }
+      is(sBusy) {
+        val nextDiv = divStep(divDividend, divQuotient, divRemainder, divDivisor)
+        when(divActive) {
+          divDividend := nextDiv._1
+          divQuotient := nextDiv._2
+          divRemainder := nextDiv._3
+        }
+
+        when(remaining === 1.U) {
+          when(divActive) {
+            val finalQuot = Mux(divQuotNeg, twos(nextDiv._2), nextDiv._2)
+            val finalRemRaw = nextDiv._3(31, 0)
+            val finalRem = Mux(divRemNeg, twos(finalRemRaw), finalRemRaw)
+            resultReg := Mux(divWantRem, finalRem, finalQuot)
+          }
+          state := sDone
+          divActive := false.B
+        }.otherwise {
+          remaining := remaining - 1.U
+        }
+      }
+      is(sDone) {
+        when(io.resp.fire) {
+          state := sIdle
+        }
+      }
+    }
+  }
 }
 ```
 
@@ -6037,6 +6193,105 @@ SECTIONS {
 }
 ```
 
+## .\src\test\MulDivALUSpec.scala
+
+```scala
+package riscv
+
+import chisel3._
+import chiseltest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import AluOp._
+
+class MulDivALUSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
+  private val Mask32 = (BigInt(1) << 32) - 1
+
+  private def u32(x: BigInt): BigInt = x & Mask32
+  private def s32(x: BigInt): BigInt = {
+    val v = u32(x)
+    if ((v & (BigInt(1) << 31)) != 0) v - (BigInt(1) << 32) else v
+  }
+
+  private def high32(x: BigInt): BigInt = u32(x >> 32)
+
+  private def expected(op: UInt, a: BigInt, b: BigInt): BigInt = {
+    val au = u32(a)
+    val bu = u32(b)
+    val as = s32(a)
+    val bs = s32(b)
+    val divByZero = bu == 0
+    val overflow = au == BigInt("80000000", 16) && bu == Mask32
+
+    op.litValue match {
+      case v if v == ALU_MUL.litValue    => u32(au * bu)
+      case v if v == ALU_MULH.litValue   => high32(as * bs)
+      case v if v == ALU_MULHSU.litValue => high32(as * bu)
+      case v if v == ALU_MULHU.litValue  => high32(au * bu)
+      case v if v == ALU_DIV.litValue =>
+        if (divByZero) Mask32 else if (overflow) au else u32(as / bs)
+      case v if v == ALU_DIVU.litValue =>
+        if (divByZero) Mask32 else u32(au / bu)
+      case v if v == ALU_REM.litValue =>
+        if (divByZero) au else if (overflow) 0 else u32(as % bs)
+      case v if v == ALU_REMU.litValue =>
+        if (divByZero) au else u32(au % bu)
+      case _ => 0
+    }
+  }
+
+  private def runOne(c: MulDivALU, op: UInt, a: BigInt, b: BigInt, latency: Int): Unit = {
+    c.io.cancel.poke(false.B)
+    c.io.resp.ready.poke(false.B)
+    c.io.req.valid.poke(true.B)
+    c.io.req.bits.op1.poke(u32(a).U)
+    c.io.req.bits.op2.poke(u32(b).U)
+    c.io.req.bits.aluOp.poke(op)
+    c.io.req.ready.expect(true.B)
+    c.clock.step()
+
+    c.io.req.valid.poke(false.B)
+    for (_ <- 1 until latency) {
+      c.io.resp.valid.expect(false.B)
+      c.clock.step()
+    }
+
+    c.io.resp.valid.expect(true.B)
+    c.io.resp.bits.expect(expected(op, a, b).U)
+    c.io.resp.ready.poke(true.B)
+    c.clock.step()
+    c.io.resp.ready.poke(false.B)
+    c.io.req.ready.expect(true.B)
+  }
+
+  behavior of "MulDivALU"
+
+  it should "compute RV32M multiply operations after 3 cycles" in {
+    test(new MulDivALU()) { c =>
+      runOne(c, ALU_MUL, -3, 7, 3)
+      runOne(c, ALU_MULH, -1, 2, 3)
+      runOne(c, ALU_MULHSU, -2, BigInt("80000000", 16), 3)
+      runOne(c, ALU_MULHU, Mask32, Mask32, 3)
+    }
+  }
+
+  it should "compute RV32M divide and remainder operations after 32 cycles" in {
+    test(new MulDivALU()) { c =>
+      runOne(c, ALU_DIV, -7, 3, 32)
+      runOne(c, ALU_DIVU, BigInt("fffffffe", 16), 2, 32)
+      runOne(c, ALU_REM, -7, 3, 32)
+      runOne(c, ALU_REMU, BigInt("fffffffe", 16), 3, 32)
+      runOne(c, ALU_DIV, 123, 0, 32)
+      runOne(c, ALU_DIVU, 123, 0, 32)
+      runOne(c, ALU_REM, 123, 0, 32)
+      runOne(c, ALU_REMU, 123, 0, 32)
+      runOne(c, ALU_DIV, BigInt("80000000", 16), Mask32, 32)
+      runOne(c, ALU_REM, BigInt("80000000", 16), Mask32, 32)
+    }
+  }
+}
+```
+
 ## .\src\test\PerfPrinter.scala
 
 ```scala
@@ -6539,6 +6794,172 @@ class PrefetchSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 }
 ```
 
+## .\src\test\RV32MSpec.scala
+
+```scala
+package riscv
+
+import chisel3._
+import chiseltest._
+import chiseltest.simulator.VerilatorBackendAnnotation
+import firrtl.options.TargetDirAnnotation
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import java.io.File
+import AluOp._
+import SyntheticAsm._
+
+class RV32MSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
+  private val Mask32 = (BigInt(1) << 32) - 1
+
+  private def u32(x: BigInt): BigInt = x & Mask32
+  private def s32(x: BigInt): BigInt = {
+    val v = u32(x)
+    if ((v & (BigInt(1) << 31)) != 0) v - (BigInt(1) << 32) else v
+  }
+  private def high32(x: BigInt): BigInt = u32(x >> 32)
+
+  private def expected(op: UInt, a: BigInt, b: BigInt): BigInt = {
+    val au = u32(a)
+    val bu = u32(b)
+    val as = s32(a)
+    val bs = s32(b)
+    val divByZero = bu == 0
+    val overflow = au == BigInt("80000000", 16) && bu == Mask32
+
+    op.litValue match {
+      case v if v == ALU_MUL.litValue    => u32(au * bu)
+      case v if v == ALU_MULH.litValue   => high32(as * bs)
+      case v if v == ALU_MULHSU.litValue => high32(as * bu)
+      case v if v == ALU_MULHU.litValue  => high32(au * bu)
+      case v if v == ALU_DIV.litValue =>
+        if (divByZero) Mask32 else if (overflow) au else u32(as / bs)
+      case v if v == ALU_DIVU.litValue =>
+        if (divByZero) Mask32 else u32(au / bu)
+      case v if v == ALU_REM.litValue =>
+        if (divByZero) au else if (overflow) 0 else u32(as % bs)
+      case v if v == ALU_REMU.litValue =>
+        if (divByZero) au else u32(au % bu)
+      case _ => 0
+    }
+  }
+
+  private def li(rd: Int, value: BigInt): Seq[Long] = {
+    val v = u32(value)
+    val upper = ((v + 0x800) >> 12) & 0xFFFFF
+    val lowerRaw = (v & 0xFFF).toInt
+    val lower = if (lowerRaw >= 0x800) lowerRaw - 0x1000 else lowerRaw
+    if (upper == 0) Seq(addi(rd, X0, lower)) else Seq(lui(rd, upper.toLong), addi(rd, rd, lower))
+  }
+
+  private def buildProgram: Seq[Long] = {
+    val p = collection.mutable.ArrayBuffer[Long]()
+
+    def emit(xs: Seq[Long]): Unit = p ++= xs
+    def alignPair(): Unit = if (p.length % 2 != 0) p += addi(X0, X0, 0)
+    def checkReg(actual: Int, expectedReg: Int): Unit = {
+      p += beq(actual, expectedReg, 8)
+      p += addi(T4, T4, 1)
+    }
+    def check(op: UInt, inst: (Int, Int, Int) => Long, a: BigInt, b: BigInt): Unit = {
+      emit(li(T0, a))
+      emit(li(T1, b))
+      p += inst(T2, T0, T1)
+      emit(li(T3, expected(op, a, b)))
+      checkReg(T2, T3)
+    }
+
+    p += addi(T4, X0, 0)
+
+    check(ALU_MUL, mul, -3, 7)
+    check(ALU_MULH, mulh, -1, 2)
+    check(ALU_MULHSU, mulhsu, -2, BigInt("80000000", 16))
+    check(ALU_MULHU, mulhu, Mask32, Mask32)
+    check(ALU_DIV, div, -7, 3)
+    check(ALU_DIVU, divu, BigInt("fffffffe", 16), 2)
+    check(ALU_REM, rem, -7, 3)
+    check(ALU_REMU, remu, BigInt("fffffffe", 16), 3)
+    check(ALU_DIV, div, 123, 0)
+    check(ALU_DIVU, divu, 123, 0)
+    check(ALU_REM, rem, 123, 0)
+    check(ALU_REMU, remu, 123, 0)
+    check(ALU_DIV, div, BigInt("80000000", 16), Mask32)
+    check(ALU_REM, rem, BigInt("80000000", 16), Mask32)
+
+    emit(li(T0, 6))
+    emit(li(T1, 7))
+    alignPair()
+    p += mul(T2, T0, T1)
+    p += add(T3, T2, T1)
+    emit(li(S0, 49))
+    checkReg(T3, S0)
+
+    emit(li(T0, -81))
+    emit(li(T1, 9))
+    p += div(T2, T0, T1)
+    p += rem(T3, T0, T1)
+    emit(li(S0, -9))
+    checkReg(T2, S0)
+    emit(li(S0, 0))
+    checkReg(T3, S0)
+
+    emitFinish(p)
+    p.toSeq
+  }
+
+  private def emitFinish(p: collection.mutable.ArrayBuffer[Long]): Unit = {
+    p += beq(T4, X0, 8)
+    p += jal(X0, 0)
+    p ++= successEpilogue
+  }
+
+  private def buildSmokeProgram: Seq[Long] = {
+    val p = collection.mutable.ArrayBuffer[Long]()
+    p += addi(T4, X0, 0)
+    p ++= li(T0, 6)
+    p ++= li(T1, 7)
+    p += mul(T2, T0, T1)
+    p ++= li(T3, 42)
+    p += beq(T2, T3, 8)
+    p += addi(T4, T4, 1)
+    emitFinish(p)
+    p.toSeq
+  }
+
+  private def runProgram(name: String, program: Seq[Long], maxCycles: Int): Unit = {
+    val dir = new File(s"rv32m_${name}_run_dir_${System.currentTimeMillis()}")
+    val initFile = SyntheticAsm.writeHex(dir, s"$name.hex", program, minWords = 512)
+    val targetDir = s"rv32m_${name}_test_dir_${System.currentTimeMillis()}"
+
+    test(new SimTop(initFile, enableRV32M = true))
+      .withAnnotations(Seq(VerilatorBackendAnnotation, TargetDirAnnotation(targetDir))) { c =>
+        c.clock.setTimeout(maxCycles + 100)
+        var cycles = 0
+        while (!c.io.success.peek().litToBoolean && cycles < maxCycles) {
+          c.clock.step()
+          cycles += 1
+        }
+        val success = c.io.success.peek().litToBoolean
+        val perf = PerfSnapshot.from(c.io.perf)
+        println(PerfPrinter.line("perf-rv32m", PerfPrinter.common(if (success) "OK" else "TIMEOUT", name, perf)))
+        withClue(s"program=$name cycles=$cycles") {
+          success shouldBe true
+        }
+      }
+  }
+
+  behavior of "RV32M"
+
+  it should "complete an RV32M smoke multiply program" in {
+    runProgram("rv32m_smoke", buildSmokeProgram, maxCycles = 2000)
+  }
+
+  it should "run a synthetic RV32M program with multi-cycle MulDivALU" in {
+    runProgram("rv32m", buildProgram, maxCycles = 20000)
+  }
+}
+```
+
 ## .\src\test\SimTop.scala
 
 ```scala
@@ -6598,8 +7019,11 @@ object SyntheticAsm {
   val T0 = 5
   val T1 = 6
   val T2 = 7
+  val S0 = 8
   val T3 = 28
   val T4 = 29
+  val T5 = 30
+  val T6 = 31
 
   def writeHex(dir: File, name: String, words: Seq[Long], minWords: Int = 512): String = {
     dir.mkdirs()
@@ -6636,6 +7060,37 @@ object SyntheticAsm {
 
   def add(rd: Int, rs1: Int, rs2: Int): Long =
     (rs2.toLong << 20) | (rs1.toLong << 15) | (rd.toLong << 7) | 0x33L
+
+  def sub(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 0, 0x20)
+
+  def mul(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 0, 0x01)
+
+  def mulh(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 1, 0x01)
+
+  def mulhsu(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 2, 0x01)
+
+  def mulhu(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 3, 0x01)
+
+  def div(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 4, 0x01)
+
+  def divu(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 5, 0x01)
+
+  def rem(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 6, 0x01)
+
+  def remu(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 7, 0x01)
+
+  private def rType(rd: Int, rs1: Int, rs2: Int, funct3: Int, funct7: Int): Long =
+    (funct7.toLong << 25) | (rs2.toLong << 20) | (rs1.toLong << 15) |
+      (funct3.toLong << 12) | (rd.toLong << 7) | 0x33L
 
   def beq(rs1: Int, rs2: Int, offset: Int): Long =
     branch(rs1, rs2, offset, 0)

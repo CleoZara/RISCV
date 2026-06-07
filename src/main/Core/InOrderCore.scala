@@ -193,7 +193,7 @@ class InOrderCore(
   hazard.io.idRedirect  := idStage.io.idRedirectValid
   hazard.io.icacheStall := ifStage.io.icacheStall
   hazard.io.dcacheStall := memStage.io.dcacheStall
-  hazard.io.backendStall := false.B
+  hazard.io.backendStall := exStage.io.mulDivStall
 
   // Pipeline register update logic
   val retireCount = PopCount(retireVec)

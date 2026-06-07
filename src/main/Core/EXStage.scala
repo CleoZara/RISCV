@@ -46,12 +46,15 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     val exRdAddr = Output(Vec(issueWidth, UInt(5.W)))
     val exRfWen  = Output(Vec(issueWidth, Bool()))
     val exResult = Output(Vec(issueWidth, UInt(32.W)))
+    val mulDivStall = Output(Bool())
 
     val out = Output(Vec(issueWidth, new EXMEMBundle))
   })
 
   val alus         = Seq.fill(issueWidth)(Module(new ParamALU(32, enableRV32M)))
+  val mulDivs      = Seq.fill(issueWidth)(Module(new MulDivALU(32)))
   val slotValid    = Wire(Vec(issueWidth, Bool()))
+  val mulDivWaiting = Wire(Vec(issueWidth, Bool()))
   val branchTaken  = Wire(Vec(issueWidth, Bool()))
   val branchTarget = Wire(Vec(issueWidth, UInt(32.W)))  // PC + imm (B/J type)
   val jalrTarget   = Wire(Vec(issueWidth, UInt(32.W)))  // rs1 + imm, lsb cleared
@@ -64,6 +67,12 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     alus(i).io.op1   := io.op1Data(i)
     alus(i).io.op2   := io.op2Data(i)
     alus(i).io.aluOp := io.in(i).aluOp
+    mulDivs(i).io.req.bits.op1   := io.op1Data(i)
+    mulDivs(i).io.req.bits.op2   := io.op2Data(i)
+    mulDivs(i).io.req.bits.aluOp := io.in(i).aluOp
+
+    val isMulDivOp = enableRV32M.B && AluOp.isMulDiv(io.in(i).aluOp)
+    val execResult = Mux(isMulDivOp, mulDivs(i).io.resp.bits, alus(i).io.result)
 
     branchTaken(i) := MuxLookup(io.in(i).brType, false.B, Seq(
       BrType.BR_EQ  -> (io.rs1Data(i) === io.rs2Data(i)),
@@ -80,11 +89,11 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     val fallThrough = io.in(i).pc + 4.U
     val isBranch    = io.in(i).brType =/= BrType.BR_NONE
     val isControl   = isBranch || io.in(i).isJump || io.in(i).isJalr
-    val forwardData = MuxLookup(io.in(i).wbSel, alus(i).io.result, Seq(
-      WbSel.WB_ALU -> alus(i).io.result,
+    val forwardData = MuxLookup(io.in(i).wbSel, execResult, Seq(
+      WbSel.WB_ALU -> execResult,
       WbSel.WB_PC4 -> fallThrough,
       WbSel.WB_CSR -> io.csrOldData,
-      WbSel.WB_MEM -> alus(i).io.result
+      WbSel.WB_MEM -> execResult
     ))
 
     actualNextPc(i) := MuxCase(fallThrough, Seq(
@@ -104,6 +113,11 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
 
     val killedByOlderRedirect = if (i == 0) false.B else redirect(0)
     val slotLive = slotValid(i) && !killedByOlderRedirect
+    val mulDivCancel = io.flushEx || killedByOlderRedirect
+    mulDivs(i).io.cancel := mulDivCancel
+    mulDivs(i).io.req.valid := slotLive && isMulDivOp && !io.flushEx
+    mulDivs(i).io.resp.ready := !io.stallEx || mulDivCancel
+    mulDivWaiting(i) := slotValid(i) && isMulDivOp && !io.flushEx && !mulDivs(i).io.resp.valid
 
     redirect(i) := slotLive &&
                    (isBranch || io.in(i).isJalr) &&
@@ -129,7 +143,7 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     io.out(i).pc        := io.in(i).pc
     io.out(i).inst      := io.in(i).inst
     io.out(i).slotIdx   := io.in(i).slotIdx
-    io.out(i).aluOut    := alus(i).io.result
+    io.out(i).aluOut    := execResult
     io.out(i).rs2Data   := io.storeData(i)
     io.out(i).rdAddr    := io.in(i).rdAddr
     io.out(i).wbSel     := io.in(i).wbSel
@@ -146,6 +160,7 @@ class EXStage(enableRV32M: Boolean = false) extends Module {
     io.out(i).ctrl.kill    := io.flushEx || io.in(i).ctrl.kill || killedByOlderRedirect
     io.out(i).ctrl.allowIn := true.B
   }
+  io.mulDivStall := mulDivWaiting.asUInt.orR
 
   // ── CSR operation ─────────────────────────────────────────────────────
   val slot0Live = slotValid(0)

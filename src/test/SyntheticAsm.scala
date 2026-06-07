@@ -8,8 +8,11 @@ object SyntheticAsm {
   val T0 = 5
   val T1 = 6
   val T2 = 7
+  val S0 = 8
   val T3 = 28
   val T4 = 29
+  val T5 = 30
+  val T6 = 31
 
   def writeHex(dir: File, name: String, words: Seq[Long], minWords: Int = 512): String = {
     dir.mkdirs()
@@ -46,6 +49,37 @@ object SyntheticAsm {
 
   def add(rd: Int, rs1: Int, rs2: Int): Long =
     (rs2.toLong << 20) | (rs1.toLong << 15) | (rd.toLong << 7) | 0x33L
+
+  def sub(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 0, 0x20)
+
+  def mul(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 0, 0x01)
+
+  def mulh(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 1, 0x01)
+
+  def mulhsu(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 2, 0x01)
+
+  def mulhu(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 3, 0x01)
+
+  def div(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 4, 0x01)
+
+  def divu(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 5, 0x01)
+
+  def rem(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 6, 0x01)
+
+  def remu(rd: Int, rs1: Int, rs2: Int): Long =
+    rType(rd, rs1, rs2, 7, 0x01)
+
+  private def rType(rd: Int, rs1: Int, rs2: Int, funct3: Int, funct7: Int): Long =
+    (funct7.toLong << 25) | (rs2.toLong << 20) | (rs1.toLong << 15) |
+      (funct3.toLong << 12) | (rd.toLong << 7) | 0x33L
 
   def beq(rs1: Int, rs2: Int, offset: Int): Long =
     branch(rs1, rs2, offset, 0)

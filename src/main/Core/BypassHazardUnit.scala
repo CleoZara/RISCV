@@ -186,7 +186,8 @@ class PipelineBypassUnit(issueWidth: Int = 2) extends Module {
     network.io.intraEx(i).rdAddr := io.idex(i).rdAddr
     network.io.intraEx(i).data := io.exResult(i)
     network.io.intraEx(i).canForward :=
-      io.idex(i).rfWen && !io.idex(i).memRen && (io.idex(i).wbSel =/= WbSel.WB_MEM)
+      io.idex(i).rfWen && !io.idex(i).memRen && (io.idex(i).wbSel =/= WbSel.WB_MEM) &&
+        !AluOp.isMulDiv(io.idex(i).aluOp)
 
     network.io.exMem(i).valid := io.exmemValid(i)
     network.io.exMem(i).rfWen := io.exmem(i).rfWen

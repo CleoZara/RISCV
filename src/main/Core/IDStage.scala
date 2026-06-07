@@ -76,6 +76,7 @@ class IDStage(enableRV32M: Boolean = false) extends Module {
     dec(0).io.out.rfWen &&
     !dec(0).io.out.memRen &&                           // Load result not available in EX
     (dec(0).io.out.wbSel === WbSel.WB_ALU) &&         // only ALU results are available to F5
+    !AluOp.isMulDiv(dec(0).io.out.aluOp) &&            // RV32M results are multi-cycle
     (dec(0).io.out.rdAddr =/= 0.U)
 
   // ── Slot-1 stall conditions ────────────────────────────────────────────
