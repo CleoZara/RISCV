@@ -1,0 +1,34 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] CoreMarkSpec:
+[info] CoreMark
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 1 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+2K performance run parameters for coremark.
+CoreMark Size    : 666
+Total ticks      : 743247
+Total time (secs): 743247
+Iterations/Sec   : 0
+Iterations       : 1
+Compiler version : GCC7.5.0
+Compiler flags   : rv32i -O2
+Memory location  : STACK
+seedcrc          : 0xe9f5
+[0]crclist       : 0xe714
+[0]crcmatrix     : 0x1fd7
+[0]crcstate      : 0x8e3a
+[0]crcfinal      : 0xe714
+Correct operation validated. See README.md for run and reporting rules.
+
+[coremark] OK in 789296 cycles
+[perf-coremark] status=OK program=coremark cycles=789296 instRetired=791645 IPC=1.0030 CPI=0.9970 metricSource=perf-counter retire0=214370 retire1=358207 retire2=216719 icacheStall=4920 dcacheStall=1791 loadUse=76898 idRedirects=0 exRedirects=65826 branchInsts=252599 branchPreds=252599 branchCorrect=186784 branchMispredicts=65815 branchDirectionMispredicts=65810 branchTargetMispredicts=5 wrongPathFlushInsts=181105 jalrInsts=12336 rasPushes=11852 rasPops=11852 rasPreds=11852 rasCorrect=11847 icacheAccesses=784743 icacheHits=784579 icacheMisses=164 icacheDemandRefills=164 dcacheLoads=59436 dcacheStores=18344 dcacheHits=77724 dcacheMisses=56 dcacheWritebacks=0 dcacheDemandRefills=56 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0
+[info] - should run coremark.hex
+[info] Run completed in 3 minutes, 37 seconds.
+[info] Total number of tests run: 1
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+[success] Total time: 220 s (03:40), completed 2026-6-9 22:47:49

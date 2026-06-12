@@ -1,0 +1,34 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] TopSpec:
+[info] InOrderCore
+
+[sim] OK in 38 cycles
+[perf-smoke] status=OK program=smoke cycles=38 instRetired=8 IPC=0.2105 CPI=4.7500 metricSource=perf-counter retire0=34 retire1=0 retire2=4 icacheStall=30 dcacheStall=0 loadUse=0 idRedirects=0 exRedirects=0 branchInsts=2 branchPreds=2 branchCorrect=2 branchMispredicts=0 branchDirectionMispredicts=0 branchTargetMispredicts=0 wrongPathFlushInsts=0 jalrInsts=0 rasPushes=0 rasPops=0 rasPreds=0 rasCorrect=0 icacheAccesses=9 icacheHits=8 icacheMisses=1 icacheDemandRefills=1 dcacheLoads=0 dcacheStores=0 dcacheHits=0 dcacheMisses=0 dcacheWritebacks=0 dcacheDemandRefills=0 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0
+[info] - should complete the smoke test (ALU + branch + success MMIO)
+Hi
+
+[sim] OK in 39 cycles
+[info] - should output 'Hi\n' via the putchar MMIO
+
+[sim] OK in 78 cycles
+[info] - should correctly store and load bytes and words (D-Cache round-trip)
+
+[sim] OK in 119 cycles
+[info] - should pass the forwarding chain, load-use stall, and branch loop
+
+[sim] OK in 75 cycles
+[info] - should show mcycle and mtime increasing (CSR + MMIO counters)
+PASS
+
+[sim] OK in 8087 cycles
+[info] - should pass the full assembly test suite (tests/test.hex)
+[info] Run completed in 3 minutes, 54 seconds.
+[info] Total number of tests run: 6
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 6, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+[success] Total time: 238 s (03:58), completed 2026-6-11 11:36:24

@@ -1,0 +1,81 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] DhrystoneSpec:
+[info] Dhrystone
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 0.63 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+
+Dhrystone Benchmark, Version 2.1 (Language: C)
+
+Program compiled without 'register' attribute
+
+Please give the number of runs through the benchmark: 
+Execution starts, 10 runs through Dhrystone
+Execution ends
+
+Final values of the variables used in the benchmark:
+
+Int_Glob:            5
+        should be:   5
+Bool_Glob:           1
+        should be:   1
+Ch_1_Glob:           A
+        should be:   A
+Ch_2_Glob:           B
+        should be:   B
+Arr_1_Glob[8]:       7
+        should be:   7
+Arr_2_Glob[8][7]:    20
+        should be:   Number_Of_Runs + 10
+Ptr_Glob->
+  Ptr_Comp:          8
+        should be:   (implementation-dependent)
+  Discr:             0
+        should be:   0
+  Enum_Comp:         2
+        should be:   2
+  Int_Comp:          17
+        should be:   17
+  Str_Comp:          DHRYSTONE PROGRAM, SOME STRING
+        should be:   DHRYSTONE PROGRAM, SOME STRING
+Next_Ptr_Glob->
+  Ptr_Comp:          8
+        should be:   (implementation-dependent), same as above
+  Discr:             0
+        should be:   0
+  Enum_Comp:         1
+        should be:   1
+  Int_Comp:          18
+        should be:   18
+  Str_Comp:          DHRYSTONE PROGRAM, SOME STRING
+        should be:   DHRYSTONE PROGRAM, SOME STRING
+Int_1_Loc:           5
+        should be:   5
+Int_2_Loc:           13
+        should be:   13
+Int_3_Loc:           7
+        should be:   7
+Enum_Loc:            1
+        should be:   1
+Str_1_Loc:           DHRYSTONE PROGRAM, 1'ST STRING
+        should be:   DHRYSTONE PROGRAM, 1'ST STRING
+Str_2_Loc:           DHRYSTONE PROGRAM, 2'ND STRING
+        should be:   DHRYSTONE PROGRAM, 2'ND STRING
+
+Cycles spent for 10 iterations dhrystone: 5044 
+Instructions retired for 10 iterations dhrystone: 4734 
+Cycles per iteration:  504.4 
+
+
+[dhry] OK in 114114 cycles
+[perf-dhry] status=OK program=dhrystone cycles=5044 instRetired=4734 IPC=0.9385 CPI=1.0655 metricSource=dhrystone-output simCycles=114114 simInstRetired=77818 simIPC=0.6819 simCPI=1.4664 retire0=53305 retire1=43800 retire2=17009 icacheStall=11040 dcacheStall=14870 loadUse=20160 idRedirects=0 exRedirects=6059 branchInsts=22568 branchPreds=22568 branchCorrect=16523 branchMispredicts=6045 branchDirectionMispredicts=5969 branchTargetMispredicts=76 wrongPathFlushInsts=17372 jalrInsts=994 rasPushes=794 rasPops=742 rasPreds=742 rasCorrect=666 icacheAccesses=103616 icacheHits=103248 icacheMisses=368 icacheDemandRefills=368 dcacheLoads=11187 dcacheStores=10153 dcacheHits=20933 dcacheMisses=407 dcacheWritebacks=185 dcacheDemandRefills=407 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0
+[info] - should run dhrystone.hex
+[info] Run completed in 1 minute, 11 seconds.
+[info] Total number of tests run: 1
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+[success] Total time: 73 s (01:13), completed 2026-6-9 22:43:44

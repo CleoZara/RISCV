@@ -1,0 +1,33 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] PrefetchDhrystoneSpec:
+[info] PrefetchDhrystone
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 1.4 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+[perf-prefetch] status=OK program=dhrystone cycles=5044 instRetired=4734 IPC=0.9385 CPI=1.0655 metricSource=dhrystone-output simCycles=114114 simInstRetired=77818 simIPC=0.6819 simCPI=1.4664 retire0=53305 retire1=43800 retire2=17009 icacheStall=11040 dcacheStall=14870 loadUse=20160 idRedirects=0 exRedirects=6059 branchInsts=22568 branchPreds=22568 branchCorrect=16523 branchMispredicts=6045 branchDirectionMispredicts=5969 branchTargetMispredicts=76 wrongPathFlushInsts=17372 jalrInsts=994 rasPushes=794 rasPops=742 rasPreds=742 rasCorrect=666 icacheAccesses=103616 icacheHits=103248 icacheMisses=368 icacheDemandRefills=368 dcacheLoads=11187 dcacheStores=10153 dcacheHits=20933 dcacheMisses=407 dcacheWritebacks=185 dcacheDemandRefills=407 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=none dhryCycles=5044 dhryInstRetired=4734 dhryIPC=0.9385
+[prefetch-none-dhry] cycles=5044 instret=4734 ipc=0.9385
+[info] - should run Dhrystone with none prefetch
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 1.3 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+[perf-prefetch] status=OK program=dhrystone cycles=5133 instRetired=4734 IPC=0.9223 CPI=1.0843 metricSource=dhrystone-output simCycles=116958 simInstRetired=77964 simIPC=0.6666 simCPI=1.5002 retire0=56036 retire1=43880 retire2=17042 icacheStall=13616 dcacheStall=15050 loadUse=20348 idRedirects=0 exRedirects=6048 branchInsts=22637 branchPreds=22637 branchCorrect=16602 branchMispredicts=6035 branchDirectionMispredicts=5961 branchTargetMispredicts=74 wrongPathFlushInsts=17410 jalrInsts=995 rasPushes=797 rasPops=745 rasPreds=743 rasCorrect=669 icacheAccesses=103564 icacheHits=103342 icacheMisses=222 icacheDemandRefills=222 dcacheLoads=11183 dcacheStores=10078 dcacheHits=20854 dcacheMisses=407 dcacheWritebacks=185 dcacheDemandRefills=407 prefetchReqs=103342 prefetchAccepted=3566 prefetchDropped=99776 prefetchRefills=3565 prefetchUseful=337 icachePrefetchReqs=103342 icachePrefetchAccepted=3566 icachePrefetchDropped=99776 icachePrefetchRefills=3565 icachePrefetchUseful=337 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=next-line dhryCycles=5133 dhryInstRetired=4734 dhryIPC=0.9223
+[prefetch-next-line-dhry] cycles=5133 instret=4734 ipc=0.9223
+[info] - should run Dhrystone with next-line prefetch
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 0.87 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+[perf-prefetch] status=OK program=dhrystone cycles=5044 instRetired=4734 IPC=0.9385 CPI=1.0655 metricSource=dhrystone-output simCycles=114114 simInstRetired=77818 simIPC=0.6819 simCPI=1.4664 retire0=53305 retire1=43800 retire2=17009 icacheStall=11040 dcacheStall=14870 loadUse=20160 idRedirects=0 exRedirects=6059 branchInsts=22568 branchPreds=22568 branchCorrect=16523 branchMispredicts=6045 branchDirectionMispredicts=5969 branchTargetMispredicts=76 wrongPathFlushInsts=17372 jalrInsts=994 rasPushes=794 rasPops=742 rasPreds=742 rasCorrect=666 icacheAccesses=103616 icacheHits=103248 icacheMisses=368 icacheDemandRefills=368 dcacheLoads=11187 dcacheStores=10153 dcacheHits=20933 dcacheMisses=407 dcacheWritebacks=185 dcacheDemandRefills=407 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=stride dhryCycles=5044 dhryInstRetired=4734 dhryIPC=0.9385
+[prefetch-stride-dhry] cycles=5044 instret=4734 ipc=0.9385
+[info] - should run Dhrystone with stride prefetch
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 1.6 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+[perf-prefetch] status=OK program=dhrystone cycles=5044 instRetired=4734 IPC=0.9385 CPI=1.0655 metricSource=dhrystone-output simCycles=114104 simInstRetired=77818 simIPC=0.6820 simCPI=1.4663 retire0=53295 retire1=43800 retire2=17009 icacheStall=11032 dcacheStall=14870 loadUse=20160 idRedirects=0 exRedirects=6058 branchInsts=22568 branchPreds=22568 branchCorrect=16524 branchMispredicts=6044 branchDirectionMispredicts=5968 branchTargetMispredicts=76 wrongPathFlushInsts=17369 jalrInsts=994 rasPushes=794 rasPops=742 rasPreds=742 rasCorrect=666 icacheAccesses=103610 icacheHits=103246 icacheMisses=364 icacheDemandRefills=364 dcacheLoads=11157 dcacheStores=10153 dcacheHits=20903 dcacheMisses=407 dcacheWritebacks=185 dcacheDemandRefills=407 prefetchReqs=101 prefetchAccepted=5 prefetchDropped=2 prefetchRefills=5 prefetchUseful=3 icachePrefetchReqs=5 icachePrefetchAccepted=5 icachePrefetchDropped=0 icachePrefetchRefills=5 icachePrefetchUseful=3 dcachePrefetchReqs=96 dcachePrefetchAccepted=0 dcachePrefetchDropped=2 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=stream dhryCycles=5044 dhryInstRetired=4734 dhryIPC=0.9385
+[prefetch-stream-dhry] cycles=5044 instret=4734 ipc=0.9385
+[info] - should run Dhrystone with stream prefetch
+[info] Run completed in 3 minutes, 53 seconds.
+[info] Total number of tests run: 4
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 4, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+[success] Total time: 236 s (03:56), completed 2026-6-9 22:56:01

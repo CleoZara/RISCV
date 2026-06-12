@@ -1,0 +1,21 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] RV32MSpec:
+[info] RV32M
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 0.77 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+[perf-rv32m] status=OK program=rv32m_smoke cycles=47 instRetired=9 IPC=0.1915 CPI=5.2222 metricSource=perf-counter retire0=41 retire1=3 retire2=3 icacheStall=30 dcacheStall=0 loadUse=0 idRedirects=0 exRedirects=2 branchInsts=3 branchPreds=3 branchCorrect=1 branchMispredicts=2 branchDirectionMispredicts=2 branchTargetMispredicts=0 wrongPathFlushInsts=6 jalrInsts=0 rasPushes=0 rasPops=0 rasPreds=0 rasCorrect=0 icacheAccesses=18 icacheHits=17 icacheMisses=1 icacheDemandRefills=1 dcacheLoads=0 dcacheStores=0 dcacheHits=0 dcacheMisses=0 dcacheWritebacks=0 dcacheDemandRefills=0 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0
+[info] - should complete an RV32M smoke multiply program
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 1.4 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+[perf-rv32m] status=OK program=rv32m cycles=647 instRetired=93 IPC=0.1437 CPI=6.9570 metricSource=perf-counter retire0=584 retire1=33 retire2=30 icacheStall=240 dcacheStall=0 loadUse=0 idRedirects=0 exRedirects=18 branchInsts=18 branchPreds=18 branchCorrect=1 branchMispredicts=17 branchDirectionMispredicts=17 branchTargetMispredicts=0 wrongPathFlushInsts=33 jalrInsts=0 rasPushes=0 rasPops=0 rasPreds=0 rasCorrect=0 icacheAccesses=444 icacheHits=436 icacheMisses=8 icacheDemandRefills=8 dcacheLoads=0 dcacheStores=0 dcacheHits=0 dcacheMisses=0 dcacheWritebacks=0 dcacheDemandRefills=0 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0
+[info] - should run a synthetic RV32M program with multi-cycle MulDivALU
+[info] Run completed in 1 minute, 18 seconds.
+[info] Total number of tests run: 2
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 2, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+[success] Total time: 80 s (01:20), completed 2026-6-9 22:51:43

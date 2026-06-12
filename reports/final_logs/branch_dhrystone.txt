@@ -1,0 +1,28 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] BranchPredictorDhrystoneSpec:
+[info] BranchPredictorDhrystone
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 1.6 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+[perf-bpred] status=OK program=dhrystone cycles=5401 instRetired=4734 IPC=0.8765 CPI=1.1409 metricSource=dhrystone-output simCycles=115796 simInstRetired=77844 simIPC=0.6723 simCPI=1.4875 retire0=54958 retire1=43832 retire2=17006 icacheStall=11340 dcacheStall=14870 loadUse=20164 idRedirects=0 exRedirects=6738 branchInsts=22584 branchPreds=22584 branchCorrect=15861 branchMispredicts=6723 branchDirectionMispredicts=6723 branchTargetMispredicts=0 wrongPathFlushInsts=19380 jalrInsts=991 rasPushes=793 rasPops=741 rasPreds=0 rasCorrect=0 icacheAccesses=105008 icacheHits=104630 icacheMisses=378 icacheDemandRefills=378 dcacheLoads=10676 dcacheStores=10153 dcacheHits=20422 dcacheMisses=407 dcacheWritebacks=185 dcacheDemandRefills=407 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=bpu dhryCycles=5401 dhryInstRetired=4734 dhryIPC=0.8765
+[bpred-bpu-dhry] cycles=5401 instret=4734 ipc=0.8765
+[info] - should run Dhrystone with bpu
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 0.8 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+[perf-bpred] status=OK program=dhrystone cycles=5044 instRetired=4734 IPC=0.9385 CPI=1.0655 metricSource=dhrystone-output simCycles=114114 simInstRetired=77818 simIPC=0.6819 simCPI=1.4664 retire0=53305 retire1=43800 retire2=17009 icacheStall=11040 dcacheStall=14870 loadUse=20160 idRedirects=0 exRedirects=6059 branchInsts=22568 branchPreds=22568 branchCorrect=16523 branchMispredicts=6045 branchDirectionMispredicts=5969 branchTargetMispredicts=76 wrongPathFlushInsts=17372 jalrInsts=994 rasPushes=794 rasPops=742 rasPreds=742 rasCorrect=666 icacheAccesses=103616 icacheHits=103248 icacheMisses=368 icacheDemandRefills=368 dcacheLoads=11187 dcacheStores=10153 dcacheHits=20933 dcacheMisses=407 dcacheWritebacks=185 dcacheDemandRefills=407 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=bpu_ras dhryCycles=5044 dhryInstRetired=4734 dhryIPC=0.9385
+[bpred-bpu_ras-dhry] cycles=5044 instret=4734 ipc=0.9385
+[info] - should run Dhrystone with bpu_ras
+make: 警告：文件“VSimTop__ver.d”的修改时间在未来 0.94 秒后
+make: 警告：检测到时钟错误。您的创建可能是不完整的。
+[perf-bpred] status=OK program=dhrystone cycles=4984 instRetired=4734 IPC=0.9498 CPI=1.0528 metricSource=dhrystone-output simCycles=113948 simInstRetired=77973 simIPC=0.6843 simCPI=1.4614 retire0=53023 retire1=43877 retire2=17048 icacheStall=10920 dcacheStall=14870 loadUse=20156 idRedirects=0 exRedirects=5980 branchInsts=22598 branchPreds=22598 branchCorrect=16634 branchMispredicts=5964 branchDirectionMispredicts=5888 branchTargetMispredicts=76 wrongPathFlushInsts=17286 jalrInsts=996 rasPushes=796 rasPops=744 rasPreds=744 rasCorrect=668 icacheAccesses=103624 icacheHits=103260 icacheMisses=364 icacheDemandRefills=364 dcacheLoads=11189 dcacheStores=10153 dcacheHits=20935 dcacheMisses=407 dcacheWritebacks=185 dcacheDemandRefills=407 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=tage dhryCycles=4984 dhryInstRetired=4734 dhryIPC=0.9498
+[bpred-tage-dhry] cycles=4984 instret=4734 ipc=0.9498
+[info] - should run Dhrystone with tage
+[info] Run completed in 3 minutes, 0 seconds.
+[info] Total number of tests run: 3
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 3, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+[success] Total time: 184 s (03:04), completed 2026-6-9 23:17:49

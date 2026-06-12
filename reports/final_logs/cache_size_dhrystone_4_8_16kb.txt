@@ -1,0 +1,28 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] CacheSizeDhrystoneSpec:
+[info] ParameterizedCacheDhrystone
+[cache-4KB] OK in 119531 cycles
+[cache-4KB] outputTail='tions retired for 10 iterations dhrystone: 4734 
+Cycles per iteration:  511.7 
+
+'
+[perf-cache] status=OK program=dhrystone cycles=5117 instRetired=4734 IPC=0.9252 CPI=1.0809 metricSource=dhrystone-output simCycles=119531 simInstRetired=78019 simIPC=0.6527 simCPI=1.5321 retire0=58602 retire1=43839 retire2=17090 icacheStall=15330 dcacheStall=15848 loadUse=20374 idRedirects=0 exRedirects=6070 branchInsts=22573 branchPreds=22573 branchCorrect=16522 branchMispredicts=6051 branchDirectionMispredicts=5977 branchTargetMispredicts=74 wrongPathFlushInsts=17356 jalrInsts=997 rasPushes=799 rasPops=747 rasPreds=745 rasCorrect=671 icacheAccesses=104973 icacheHits=104462 icacheMisses=511 icacheDemandRefills=511 dcacheLoads=11594 dcacheStores=10489 dcacheHits=21670 dcacheMisses=413 dcacheWritebacks=251 dcacheDemandRefills=413 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=4KB iCacheKB=4 dCacheKB=4 iWay=4 dWay=4
+[info] - should run Dhrystone with 4KB I/D caches
+[cache-8KB] OK in 114114 cycles
+[cache-8KB] outputTail='tions retired for 10 iterations dhrystone: 4734 
+Cycles per iteration:  504.4 
+
+'
+[perf-cache] status=OK program=dhrystone cycles=5044 instRetired=4734 IPC=0.9385 CPI=1.0655 metricSource=dhrystone-output simCycles=114114 simInstRetired=77818 simIPC=0.6819 simCPI=1.4664 retire0=53305 retire1=43800 retire2=17009 icacheStall=11040 dcacheStall=14870 loadUse=20160 idRedirects=0 exRedirects=6059 branchInsts=22568 branchPreds=22568 branchCorrect=16523 branchMispredicts=6045 branchDirectionMispredicts=5969 branchTargetMispredicts=76 wrongPathFlushInsts=17372 jalrInsts=994 rasPushes=794 rasPops=742 rasPreds=742 rasCorrect=666 icacheAccesses=103616 icacheHits=103248 icacheMisses=368 icacheDemandRefills=368 dcacheLoads=11187 dcacheStores=10153 dcacheHits=20933 dcacheMisses=407 dcacheWritebacks=185 dcacheDemandRefills=407 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=8KB iCacheKB=8 dCacheKB=8 iWay=4 dWay=4
+[info] - should run Dhrystone with 8KB I/D caches
+[cache-16KB] OK in 111388 cycles
+[cache-16KB] outputTail='tions retired for 10 iterations dhrystone: 4734 
+Cycles per iteration:  493.4 
+
+'
+[perf-cache] status=OK program=dhrystone cycles=4934 instRetired=4734 IPC=0.9595 CPI=1.0422 metricSource=dhrystone-output simCycles=111388 simInstRetired=77988 simIPC=0.7001 simCPI=1.4283 retire0=50452 retire1=43884 retire2=17052 icacheStall=9600 dcacheStall=13387 loadUse=19783 idRedirects=0 exRedirects=6077 branchInsts=22607 branchPreds=22607 branchCorrect=16543 branchMispredicts=6064 branchDirectionMispredicts=5988 branchTargetMispredicts=76 wrongPathFlushInsts=17411 jalrInsts=996 rasPushes=796 rasPops=744 rasPreds=744 rasCorrect=668 icacheAccesses=102311 icacheHits=101991 icacheMisses=320 icacheDemandRefills=320 dcacheLoads=11065 dcacheStores=10149 dcacheHits=20815 dcacheMisses=399 dcacheWritebacks=83 dcacheDemandRefills=399 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=16KB iCacheKB=16 dCacheKB=16 iWay=4 dWay=4
+[info] - should run Dhrystone with 16KB I/D caches

@@ -1,0 +1,20 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] CacheSizeDhrystoneSpec:
+[info] ParameterizedCacheDhrystone
+[cache-I16KB_D32KB] OK in 109369 cycles
+[cache-I16KB_D32KB] outputTail='tions retired for 10 iterations dhrystone: 4734 
+Cycles per iteration:  493.4 
+
+'
+[perf-cache] status=OK program=dhrystone cycles=4934 instRetired=4734 IPC=0.9595 CPI=1.0422 metricSource=dhrystone-output simCycles=109369 simInstRetired=77988 simIPC=0.7131 simCPI=1.4024 retire0=48433 retire1=43884 retire2=17052 icacheStall=9600 dcacheStall=11368 loadUse=18673 idRedirects=0 exRedirects=6077 branchInsts=22607 branchPreds=22607 branchCorrect=16543 branchMispredicts=6064 branchDirectionMispredicts=5988 branchTargetMispredicts=76 wrongPathFlushInsts=17411 jalrInsts=996 rasPushes=796 rasPops=744 rasPreds=744 rasCorrect=668 icacheAccesses=100292 icacheHits=99972 icacheMisses=320 icacheDemandRefills=320 dcacheLoads=11033 dcacheStores=10148 dcacheHits=20815 dcacheMisses=366 dcacheWritebacks=0 dcacheDemandRefills=366 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=I16KB_D32KB iCacheKB=16 dCacheKB=32 iWay=4 dWay=4
+[info] - should run Dhrystone I16_D32
+[info] Run completed in 4 minutes, 54 seconds.
+[info] Total number of tests run: 1
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+[success] Total time: 298 s (04:58), completed 2026-6-11 12:24:58

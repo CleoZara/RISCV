@@ -1,0 +1,20 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] CacheSizeDhrystoneSpec:
+[info] ParameterizedCacheDhrystone
+[cache-I32KB_D16KB] OK in 110909 cycles
+[cache-I32KB_D16KB] outputTail='tions retired for 10 iterations dhrystone: 4734 
+Cycles per iteration:  493.4 
+
+'
+[perf-cache] status=OK program=dhrystone cycles=4934 instRetired=4734 IPC=0.9595 CPI=1.0422 metricSource=dhrystone-output simCycles=110909 simInstRetired=77989 simIPC=0.7032 simCPI=1.4221 retire0=49972 retire1=43885 retire2=17052 icacheStall=9120 dcacheStall=13387 loadUse=19783 idRedirects=0 exRedirects=6077 branchInsts=22608 branchPreds=22608 branchCorrect=16543 branchMispredicts=6065 branchDirectionMispredicts=5989 branchTargetMispredicts=76 wrongPathFlushInsts=17411 jalrInsts=996 rasPushes=796 rasPops=744 rasPreds=744 rasCorrect=668 icacheAccesses=102267 icacheHits=101963 icacheMisses=304 icacheDemandRefills=304 dcacheLoads=11065 dcacheStores=10059 dcacheHits=20725 dcacheMisses=399 dcacheWritebacks=83 dcacheDemandRefills=399 prefetchReqs=0 prefetchAccepted=0 prefetchDropped=0 prefetchRefills=0 prefetchUseful=0 icachePrefetchReqs=0 icachePrefetchAccepted=0 icachePrefetchDropped=0 icachePrefetchRefills=0 icachePrefetchUseful=0 dcachePrefetchReqs=0 dcachePrefetchAccepted=0 dcachePrefetchDropped=0 dcachePrefetchRefills=0 dcachePrefetchUseful=0 mode=I32KB_D16KB iCacheKB=32 dCacheKB=16 iWay=4 dWay=4
+[info] - should run Dhrystone I32_D16
+[info] Run completed in 4 minutes, 43 seconds.
+[info] Total number of tests run: 1
+[info] Suites: completed 1, aborted 0
+[info] Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
+[info] All tests passed.
+[success] Total time: 287 s (04:47), completed 2026-6-11 12:19:29

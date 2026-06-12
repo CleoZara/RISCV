@@ -1,0 +1,9 @@
+[info] welcome to sbt 1.9.9 (Oracle Corporation Java 1.8.0_301)
+[info] loading global plugins from /home/chisellab/.sbt/1.0/plugins
+[info] loading project definition from /mnt/hgfs/ubuntu_share/RISCV/project
+[info] loading settings for project root from build.sbt ...
+[info] set current project to riscv-pipeline (in build file:/mnt/hgfs/ubuntu_share/RISCV/)
+[info] Executing in batch mode. For better performance use sbt's shell
+[info] compiling 14 Scala sources to /mnt/hgfs/ubuntu_share/RISCV/target/scala-2.13/classes ...
+[info] done compiling
+[success] Total time: 12 s, completed 2026-6-9 22:38:57
